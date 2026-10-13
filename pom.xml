@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- ===== Thông tin dự án ===== -->
+    <groupId>com.pbl4</groupId>
+    <artifactId>pbl4-de-tai-21-day-hoc-truc-tuyen</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>PBL4 - De tai 21 - Day hoc truc tuyen</name>
+
+    <properties>
+        <!-- Java 21 LTS. Thuoc tinh nay thay cho <source>/<target> cu. -->
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <exec.plugin.version>3.1.0</exec.plugin.version>
+        <!--
+            Class chay mac dinh khi go "mvn exec:java".
+            Phai la PROPERTY (khong phai gia tri cung trong <configuration>), neu khong
+            tham so -Dexec.mainClass=... o dong lenh se bi bo qua va Maven luon chay ServerMain.
+              mvn exec:java                                                     -> chay server
+              mvn exec:java -Dexec.mainClass=com.pbl4.tools.T0Demo              -> chay bai test T0
+        -->
+        <exec.mainClass>com.pbl4.server.ServerMain</exec.mainClass>
+    </properties>
+
+    <dependencies>
+        <!--
+            Dependency NGOAI DUY NHAT cua ca du an.
+            Do TV3 dung cho tang server/db/ (SQLite). TV1 chi goi qua interface DatabaseManager
+            nen tang server/ cua TV1 khong phu thuoc truc tiep vao thu vien nay.
+        -->
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.53.4.0</version>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+
+            <!--
+                exec-maven-plugin: cho phep chay thang mot class bang Maven, khong can cau hinh IDE.
+                  mvn exec:java                     -> chay server
+                  mvn exec:java -Dexec.mainClass=com.pbl4.tools.T0Demo
+            -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>${exec.plugin.version}</version>
+                <configuration>
+                    <mainClass>${exec.mainClass}</mainClass>
+                </configuration>
+            </plugin>
+
+            <!-- Đóng gói jar kèm Main-Class để có thể chạy bằng java -jar -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifest>
+                            <mainClass>com.pbl4.server.ServerMain</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+            </plugin>
+
+        </plugins>
+    </build>
+
+</project>

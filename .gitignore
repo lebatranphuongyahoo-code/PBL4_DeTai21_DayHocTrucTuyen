@@ -1,0 +1,32 @@
+# ===== Build output =====
+target/
+out/
+build/
+*.class
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+
+# ===== Co so du lieu SQLite (du lieu test, khong day len Git) =====
+*.db
+*.db-journal
+*.sqlite
+
+# ===== File test sinh ra khi chay: am thanh, anh, video =====
+*.wav
+*.jpg
+*.jpeg
+*.png
+*.mp4
+
+# ===== He dieu hanh =====
+.DS_Store
+Thumbs.db
+desktop.ini
