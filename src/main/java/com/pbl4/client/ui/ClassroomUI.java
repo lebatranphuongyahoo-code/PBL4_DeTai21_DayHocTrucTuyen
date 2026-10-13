@@ -6,11 +6,6 @@ import com.pbl4.common.PacketType;
 import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
 
-import javax.imageio.ImageIO;
-import javax.imageio.IIOImage;
-import javax.imageio.ImageWriteParam;
-import javax.imageio.ImageWriter;
-import javax.imageio.stream.ImageOutputStream;
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
@@ -26,27 +21,15 @@ import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.FlowLayout;
-import java.awt.Graphics2D;
-import java.awt.GraphicsDevice;
-import java.awt.GraphicsEnvironment;
-import java.awt.Rectangle;
-import java.awt.RenderingHints;
-import java.awt.Robot;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.awt.image.BufferedImage;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.DatagramSocket;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /** User interface for a joined online classroom. */
 public class ClassroomUI {
@@ -82,7 +65,7 @@ public class ClassroomUI {
     private final JTextArea chatArea = new JTextArea(3, 22);
     private final JTextField chatInput = new JTextField(16);
     private final JLabel statusLabel = new JLabel("Đã vào lớp.");
-    private final ScreenCapturer screenCapturer = new ScreenCapturer();
+    private volatile Consumer<Packet> screenFrameListener = packet -> { };
 
     private boolean micOn;
     private boolean sharing;
@@ -109,7 +92,6 @@ public class ClassroomUI {
         connection.setListener(this::onPacket);
         connection.setDisconnectListener(cause -> SwingUtilities.invokeLater(() -> {
             inRoom = false;
-            screenCapturer.stop();
             stopAudioDevices();
             disableControls();
             showStatus("Mất kết nối máy chủ: " + cause.getMessage(), true);
@@ -120,6 +102,12 @@ public class ClassroomUI {
         leaveButton.addActionListener(event -> leaveRoom());
         chatInput.addActionListener(event -> sendChat());
         frame.setVisible(true);
+    }
+
+    /** Registers TV2's screen-frame receiver; it is called from the network thread. */
+    @SuppressWarnings("unused")
+    public void setScreenFrameListener(Consumer<Packet> listener) {
+        screenFrameListener = Objects.requireNonNull(listener, "listener");
     }
 
     private void buildWindow(String username) {
@@ -235,7 +223,6 @@ public class ClassroomUI {
             return;
         }
         if (sharing) {
-            screenCapturer.stop();
             if (sendRoomCommand(PacketType.SCREEN_STOP, "Đã dừng chia sẻ màn hình.")) {
                 sharing = false;
                 shareButton.setText("Chia sẻ màn hình");
@@ -246,16 +233,9 @@ public class ClassroomUI {
         if (!sendRoomCommand(PacketType.SCREEN_START, "Đang bắt đầu chia sẻ...")) {
             return;
         }
-        try {
-            screenCapturer.start();
-            sharing = true;
-            shareButton.setText("Dừng chia sẻ màn hình");
-            showStatus("Đang chia sẻ màn hình.", false);
-        } catch (Exception e) {
-            screenCapturer.stop();
-            sendRoomCommand(PacketType.SCREEN_STOP, "Không thể bắt đầu chia sẻ màn hình.");
-            showStatus("Không thể bắt đầu chia sẻ màn hình: " + e.getMessage(), true);
-        }
+        sharing = true;
+        shareButton.setText("Dừng chia sẻ màn hình");
+        showStatus("Đã gửi yêu cầu bắt đầu chia sẻ.", false);
     }
 
     private boolean sendRoomCommand(byte type, String status) {
@@ -308,7 +288,6 @@ public class ClassroomUI {
                 connection.send(PacketType.AUDIO_OFF, audioOffPayload);
             }
             if (sharing) {
-                screenCapturer.stop();
                 sendRoomCommand(PacketType.SCREEN_STOP, "Đang rời phòng...");
                 sharing = false;
             }
@@ -326,12 +305,7 @@ public class ClassroomUI {
                     List<String> members = readMembers(packet);
                     SwingUtilities.invokeLater(() -> displayMembers(members));
                 }
-                case PacketType.SCREEN_FRAME -> {
-                    BufferedImage image = ImageIO.read(new ByteArrayInputStream(packet.getPayload()));
-                    if (image != null) {
-                        SwingUtilities.invokeLater(() -> screenPanel.setImage(image));
-                    }
-                }
+                case PacketType.SCREEN_FRAME -> screenFrameListener.accept(packet);
                 case PacketType.SCREEN_START -> {
                     String teacher = readTeacher(packet);
                     SwingUtilities.invokeLater(() ->
@@ -352,7 +326,6 @@ public class ClassroomUI {
                     SwingUtilities.invokeLater(() -> {
                         if (sharing && message.toLowerCase(java.util.Locale.ROOT)
                                 .contains("chi giao vien")) {
-                            screenCapturer.stop();
                             sharing = false;
                             shareButton.setText("Chia sẻ màn hình");
                         }
@@ -433,122 +406,8 @@ public class ClassroomUI {
         chatInput.setEnabled(false);
     }
 
-    private void captureFailed(IOException cause) {
-        SwingUtilities.invokeLater(() -> {
-            screenCapturer.stop();
-            if (sharing) {
-                sharing = false;
-                shareButton.setText("Chia sẻ màn hình");
-            }
-            showStatus("Lỗi chia sẻ màn hình: " + cause.getMessage(), true);
-        });
-    }
-
     private void showStatus(String message, boolean error) {
         statusLabel.setText(message);
         statusLabel.setForeground(error ? Color.RED : Color.DARK_GRAY);
-    }
-
-    private final class ScreenCapturer {
-        private static final int MAX_WIDTH = 1280;
-        private static final int MAX_HEIGHT = 720;
-        private static final long FRAME_INTERVAL_MILLIS = 200;
-
-        private ScheduledExecutorService executor;
-        private volatile boolean active;
-
-        synchronized void start() throws Exception {
-            if (active) {
-                return;
-            }
-            if (GraphicsEnvironment.isHeadless()) {
-                throw new IllegalStateException("Môi trường hiện tại không có màn hình để chụp");
-            }
-
-            GraphicsDevice device = GraphicsEnvironment.getLocalGraphicsEnvironment()
-                    .getDefaultScreenDevice();
-            Rectangle screenBounds = device.getDefaultConfiguration().getBounds();
-            Robot robot = new Robot(device);
-            executor = Executors.newSingleThreadScheduledExecutor(task -> {
-                Thread thread = new Thread(task, "screen-capture");
-                thread.setDaemon(true);
-                return thread;
-            });
-            active = true;
-            executor.scheduleWithFixedDelay(
-                    () -> captureAndSend(robot, screenBounds),
-                    0,
-                    FRAME_INTERVAL_MILLIS,
-                    TimeUnit.MILLISECONDS);
-        }
-
-        synchronized void stop() {
-            active = false;
-            if (executor != null) {
-                executor.shutdownNow();
-                executor = null;
-            }
-        }
-
-        private void captureAndSend(Robot robot, Rectangle screenBounds) {
-            if (!active) {
-                return;
-            }
-            try {
-                BufferedImage screenshot = robot.createScreenCapture(screenBounds);
-                byte[] jpeg = encodeJpeg(screenshot);
-                if (active) {
-                    connection.send(PacketType.SCREEN_FRAME, jpeg);
-                }
-            } catch (IOException | RuntimeException e) {
-                active = false;
-                captureFailed(e instanceof IOException ioException
-                        ? ioException
-                        : new IOException("Không thể chụp hoặc mã hóa frame", e));
-            }
-        }
-
-        private byte[] encodeJpeg(BufferedImage source) throws IOException {
-            double scale = Math.min(1.0, Math.min(
-                    (double) MAX_WIDTH / source.getWidth(),
-                    (double) MAX_HEIGHT / source.getHeight()));
-            int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
-            int height = Math.max(1, (int) Math.round(source.getHeight() * scale));
-
-            BufferedImage rgbImage = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-            Graphics2D graphics = rgbImage.createGraphics();
-            try {
-                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                        RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                graphics.setRenderingHint(RenderingHints.KEY_RENDERING,
-                        RenderingHints.VALUE_RENDER_QUALITY);
-                graphics.drawImage(source, 0, 0, width, height, Color.BLACK, null);
-            } finally {
-                graphics.dispose();
-            }
-
-            Iterator<ImageWriter> writers = ImageIO.getImageWritersByFormatName("jpeg");
-            if (!writers.hasNext()) {
-                throw new IOException("Không tìm thấy bộ mã hóa JPEG");
-            }
-            ImageWriter writer = writers.next();
-            try (ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-                 ImageOutputStream imageOutput = ImageIO.createImageOutputStream(bytes)) {
-                if (imageOutput == null) {
-                    throw new IOException("Không tạo được luồng mã hóa JPEG");
-                }
-                writer.setOutput(imageOutput);
-                ImageWriteParam parameters = writer.getDefaultWriteParam();
-                if (parameters.canWriteCompressed()) {
-                    parameters.setCompressionMode(ImageWriteParam.MODE_EXPLICIT);
-                    parameters.setCompressionQuality(0.65f);
-                }
-                writer.write(null, new IIOImage(rgbImage, null, null), parameters);
-                imageOutput.flush();
-                return bytes.toByteArray();
-            } finally {
-                writer.dispose();
-            }
-        }
     }
 }
