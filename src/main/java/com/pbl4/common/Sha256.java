@@ -22,6 +22,11 @@ public final class Sha256 {
 
     /** Trả về chuỗi hex thường (64 ký tự) của SHA-256 trên chuỗi đầu vào. */
     public static String hex(String input) {
+        return sha256Hex(input);
+    }
+
+    /** Trả về chuỗi hex thường (64 ký tự) của SHA-256 trên chuỗi đầu vào. */
+    public static String sha256Hex(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
@@ -32,8 +37,8 @@ public final class Sha256 {
             }
             return sb.toString();
         } catch (NoSuchAlgorithmException e) {
-            // SHA-256 là thuật toán bắt buộc trong mọi JDK, không thể thiếu.
-            throw new IllegalStateException("JDK khong ho tro SHA-256", e);
+            // SHA-256 is required by every Java implementation; absence is a configuration/runtime failure.
+            throw new IllegalStateException("SHA-256 is not available in this Java runtime", e);
         }
     }
 }

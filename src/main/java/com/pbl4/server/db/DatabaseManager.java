@@ -1,48 +1,169 @@
 package com.pbl4.server.db;
 
+import com.pbl4.common.Protocol;
 import com.pbl4.common.RoomInfo;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Hợp đồng giữa TV1 (người gọi) và TV3 (người cài đặt) — bảng 1.5.5 của tài liệu.
+ * SQLite-backed user and room storage.
  *
- * <p><b>Vì sao là interface chứ không phải class cụ thể:</b> TV1 cần biên dịch và chạy thử server
- * TRƯỚC khi TV3 xong SQLite. Với interface, TV1 dùng bản tạm {@link InMemoryDatabaseManager}
- * để chạy thử mức T0, còn TV3 viết {@code SqliteDatabaseManager} cài đặt đúng interface này.
- * Chữ ký 4 phương thức <b>không đổi</b> so với tài liệu, nên hợp đồng vẫn nguyên vẹn.</p>
- *
- * <p>⚠️ <b>Cần cả nhóm xác nhận</b> (mục 1.5.6) trước khi commit — đây là bổ sung so với bảng 1.5.5.</p>
- *
- * <p>Người viết: TV1 (interface) · Người cài đặt: TV3.</p>
+ * <p>Values must be bound through {@link PreparedStatement}, not concatenated into SQL:
+ * concatenating user input can change the meaning of a query (SQL injection), while
+ * prepared statements send values separately from the SQL syntax.</p>
  */
-public interface DatabaseManager {
+public class DatabaseManager implements AutoCloseable {
+
+    private static final int SQLITE_CONSTRAINT = 19;
+    private static final int ROOM_ID_ATTEMPTS = 100;
+
+    private final Connection connection;
 
     /**
-     * Xác thực đăng nhập.
+     * Opens the SQLite database at {@code dbPath} and creates its tables if needed.
      *
-     * @param user      tên đăng nhập
-     * @param sha256Hex mật khẩu ĐÃ BĂM ở client (64 ký tự hex)
-     * @return {@code "TEACHER"} hoặc {@code "STUDENT"} nếu đúng, {@code null} nếu sai
+     * @param dbPath path to the database file; use {@code :memory:} for an in-memory database
+     * @throws IllegalStateException if the database cannot be opened or initialized
      */
-    String authenticate(String user, String sha256Hex);
+    public DatabaseManager(String dbPath) {
+        Objects.requireNonNull(dbPath, "dbPath");
+        Connection opened = null;
+        try {
+            opened = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
+            try (PreparedStatement statement = opened.prepareStatement("PRAGMA foreign_keys = ON")) {
+                statement.execute();
+            }
+            try (PreparedStatement statement = opened.prepareStatement(
+                    """
+                    CREATE TABLE IF NOT EXISTS Users (
+                        username TEXT PRIMARY KEY,
+                        password_hash TEXT NOT NULL,
+                        role TEXT NOT NULL
+                    )
+                    """)) {
+                statement.executeUpdate();
+            }
+            try (PreparedStatement statement = opened.prepareStatement(
+                    """
+                    CREATE TABLE IF NOT EXISTS Rooms (
+                        room_id INTEGER PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        teacher_user TEXT NOT NULL,
+                        FOREIGN KEY (teacher_user) REFERENCES Users(username)
+                    )
+                    """)) {
+                statement.executeUpdate();
+            }
+            connection = opened;
+        } catch (SQLException e) {
+            if (opened != null) {
+                try {
+                    opened.close();
+                } catch (SQLException closeException) {
+                    e.addSuppressed(closeException);
+                }
+            }
+            throw new IllegalStateException("Cannot initialize SQLite database: " + dbPath, e);
+        }
+    }
 
     /**
-     * Đăng ký tài khoản mới.
+     * Registers a user.
      *
-     * @param role {@link com.pbl4.common.Protocol#ROLE_TEACHER} hoặc {@link com.pbl4.common.Protocol#ROLE_STUDENT}
-     * @return {@code true} nếu tạo được, {@code false} nếu tên đã tồn tại
+     * @return {@code false} only when the username already exists
      */
-    boolean register(String user, String sha256Hex, String role);
+    public synchronized boolean register(String user, String sha256Hex, String role) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO Users (username, password_hash, role) VALUES (?, ?, ?)")) {
+            statement.setString(1, user);
+            statement.setString(2, sha256Hex);
+            statement.setString(3, role);
+            statement.executeUpdate();
+            return true;
+        } catch (SQLException e) {
+            if (isConstraintOn(e, "Users.username")) {
+                return false;
+            }
+            throw new IllegalStateException("Cannot register user", e);
+        }
+    }
 
-    /**
-     * Tạo lớp học mới và lưu lại.
-     *
-     * @return roomId (số 6 chữ số) — <b>cơ sở dữ liệu là nơi cấp mã phòng</b>,
-     *         để mã không trùng giữa các lần chạy lại server
-     */
-    int createRoom(String name, String teacherUser);
+    /** Returns the stored role when both credentials match, or {@code null} otherwise. */
+    public synchronized String authenticate(String user, String sha256Hex) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT role FROM Users WHERE username = ? AND password_hash = ?")) {
+            statement.setString(1, user);
+            statement.setString(2, sha256Hex);
+            try (ResultSet result = statement.executeQuery()) {
+                return result.next() ? result.getString("role") : null;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot authenticate user", e);
+        }
+    }
 
-    /** Danh sách lớp học đã lưu. Trường {@code memberCount} do TV1 tự điền từ trạng thái RAM. */
-    List<RoomInfo> listRooms();
+    /** Creates a room with a unique six-digit ID and returns that ID. */
+    public synchronized int createRoom(String name, String teacherUser) {
+        for (int attempt = 0; attempt < ROOM_ID_ATTEMPTS; attempt++) {
+            int roomId = ThreadLocalRandom.current()
+                    .nextInt(Protocol.ROOM_ID_MIN, Protocol.ROOM_ID_MAX + 1);
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "INSERT INTO Rooms (room_id, name, teacher_user) VALUES (?, ?, ?)")) {
+                statement.setInt(1, roomId);
+                statement.setString(2, name);
+                statement.setString(3, teacherUser);
+                statement.executeUpdate();
+                return roomId;
+            } catch (SQLException e) {
+                if (isConstraintOn(e, "Rooms.room_id")) {
+                    continue;
+                }
+                throw new IllegalStateException("Cannot create room", e);
+            }
+        }
+        throw new IllegalStateException("Cannot allocate a unique room ID after "
+                + ROOM_ID_ATTEMPTS + " attempts");
+    }
+
+    /** Returns saved rooms; {@code memberCount} is zero because online state is kept in memory. */
+    public synchronized List<RoomInfo> listRooms() {
+        List<RoomInfo> rooms = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT room_id, name, teacher_user FROM Rooms ORDER BY room_id");
+             ResultSet result = statement.executeQuery()) {
+            while (result.next()) {
+                rooms.add(new RoomInfo(
+                        result.getInt("room_id"),
+                        result.getString("name"),
+                        result.getString("teacher_user"),
+                        0));
+            }
+            return rooms;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot list rooms", e);
+        }
+    }
+
+    @Override
+    public synchronized void close() {
+        try {
+            connection.close();
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot close SQLite database", e);
+        }
+    }
+
+    private static boolean isConstraintOn(SQLException exception, String column) {
+        return (exception.getErrorCode() & 0xFF) == SQLITE_CONSTRAINT
+                && exception.getMessage() != null
+                && exception.getMessage().contains(column);
+    }
 }
