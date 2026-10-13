@@ -13,13 +13,12 @@ import java.util.concurrent.ThreadLocalRandom;
  * Bản cài đặt TẠM, giữ dữ liệu trong RAM — <b>chỉ dùng để TV1 chạy thử mức T0</b>
  * khi TV3 chưa xong SQLite.
  *
- * <p>Dữ liệu mất khi tắt server. Khi TV3 hoàn thành {@code SqliteDatabaseManager},
- * đổi một dòng trong {@link com.pbl4.server.ServerMain} là xong — không phải sửa
- * bất kỳ chỗ nào khác, vì cả hai cùng cài đặt {@link DatabaseManager}.</p>
+ * <p>Dữ liệu mất khi tắt server. Lớp này kế thừa {@link DatabaseManager} để tiếp tục
+ * dùng được ở các nơi nhận kiểu DatabaseManager.</p>
  *
  * <p>Người viết: TV1. <b>TV3 sẽ thay bằng bản SQLite thật.</b></p>
  */
-public class InMemoryDatabaseManager implements DatabaseManager {
+public class InMemoryDatabaseManager extends DatabaseManager {
 
     /** username → "sha256Hex|role" */
     private final Map<String, String> users = new ConcurrentHashMap<>();
@@ -28,6 +27,7 @@ public class InMemoryDatabaseManager implements DatabaseManager {
     private final Map<Integer, String> rooms = new ConcurrentHashMap<>();
 
     public InMemoryDatabaseManager() {
+        super(":memory:");
         // Hai tài khoản mẫu để test nhanh: mat khau la "123456"
         String hash = com.pbl4.common.Sha256.hex("123456");
         users.put("lan", hash + "|" + Protocol.ROLE_TEACHER);

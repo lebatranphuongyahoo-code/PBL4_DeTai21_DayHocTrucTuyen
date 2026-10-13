@@ -1,0 +1,320 @@
+package com.pbl4.client.ui;
+
+import com.pbl4.client.net.ServerConnection;
+import com.pbl4.common.Packet;
+import com.pbl4.common.PacketType;
+import com.pbl4.common.PacketUtils;
+import com.pbl4.common.Protocol;
+import com.pbl4.common.RoomInfo;
+
+import javax.swing.BorderFactory;
+import javax.swing.DefaultListModel;
+import javax.swing.JButton;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JList;
+import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.JTextField;
+import javax.swing.ListSelectionModel;
+import javax.swing.SwingUtilities;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.FlowLayout;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.io.DataInputStream;
+import java.io.IOException;
+import java.net.DatagramSocket;
+import java.net.SocketException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+/** Home screen for creating, browsing, and joining classrooms. */
+public class HomeUI {
+
+    private final ServerConnection connection;
+    private final DatagramSocket audioSocket;
+    private final String username;
+    private final String role;
+    private final String serverIp;
+    private final JFrame frame = new JFrame("Trang chủ");
+    private final JTextField roomNameField = new JTextField(20);
+    private final JButton createRoomButton = new JButton("Tạo lớp");
+    private final JButton refreshButton = new JButton("Làm mới");
+    private final JButton joinButton = new JButton("Tham gia");
+    private final JLabel createHint = new JLabel();
+    private final JLabel statusLabel = new JLabel("Đã đăng nhập.");
+    private final DefaultListModel<RoomEntry> roomModel = new DefaultListModel<>();
+    private final JList<RoomEntry> roomList = new JList<>(roomModel);
+    private boolean connectionAlive = true;
+    private boolean handedOff;
+    private volatile RoomEntry joiningRoom;
+    private final Object joinPacketLock = new Object();
+    private final List<Packet> earlyMemberPackets = new ArrayList<>();
+    private ClassroomUI classroom;
+
+    public HomeUI(ServerConnection connection, String username, String role, String serverIp) {
+        this.connection = Objects.requireNonNull(connection, "connection");
+        this.username = username;
+        this.role = role;
+        this.serverIp = Objects.requireNonNull(serverIp, "serverIp");
+        boolean teacher = Protocol.ROLE_TEACHER.equals(role);
+        DatagramSocket openedAudioSocket;
+        try {
+            openedAudioSocket = new DatagramSocket(0);
+        } catch (SocketException e) {
+            openedAudioSocket = null;
+            statusLabel.setForeground(Color.RED);
+            statusLabel.setText("Không mở được cổng UDP nhận thoại: " + e.getMessage());
+        }
+        audioSocket = openedAudioSocket;
+
+        buildWindow(username, role, teacher);
+        connection.setListener(this::onPacket);
+        connection.setDisconnectListener(cause -> SwingUtilities.invokeLater(() -> {
+            connectionAlive = false;
+            statusLabel.setForeground(Color.RED);
+            statusLabel.setText("Mất kết nối máy chủ: " + cause.getMessage());
+            disableRoomActions();
+        }));
+
+        createRoomButton.addActionListener(event -> createRoom());
+        refreshButton.addActionListener(event -> requestRoomList());
+        joinButton.addActionListener(event -> joinSelectedRoom());
+        frame.setVisible(true);
+
+        if (audioSocket != null) {
+            requestRoomList();
+        }
+    }
+
+    private void buildWindow(String username, String role, boolean teacher) {
+        JPanel createPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        createPanel.add(new JLabel("Tên lớp:"));
+        createPanel.add(roomNameField);
+        createRoomButton.setEnabled(teacher && audioSocket != null);
+        createPanel.add(createRoomButton);
+        createHint.setText(teacher ? "" : "Chỉ giáo viên được tạo lớp.");
+        createPanel.add(createHint);
+
+        roomList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        JPanel roomPanel = new JPanel(new BorderLayout(8, 8));
+        roomPanel.setBorder(BorderFactory.createTitledBorder("Danh sách lớp"));
+        roomPanel.add(new JScrollPane(roomList), BorderLayout.CENTER);
+
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        refreshButton.setEnabled(audioSocket != null);
+        joinButton.setEnabled(false);
+        actions.add(refreshButton);
+        actions.add(joinButton);
+        roomPanel.add(actions, BorderLayout.SOUTH);
+        roomList.addListSelectionListener(event ->
+                joinButton.setEnabled(!event.getValueIsAdjusting()
+                        && roomList.getSelectedValue() != null
+                        && connectionAlive
+                        && audioSocket != null));
+
+        JPanel footer = new JPanel(new BorderLayout());
+        footer.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
+        footer.add(statusLabel, BorderLayout.CENTER);
+
+        JPanel mainPanel = new JPanel(new BorderLayout(8, 8));
+        mainPanel.setBorder(BorderFactory.createEmptyBorder(8, 10, 0, 10));
+        mainPanel.add(createPanel, BorderLayout.NORTH);
+        mainPanel.add(roomPanel, BorderLayout.CENTER);
+
+        frame.setLayout(new BorderLayout(8, 8));
+        frame.add(new JLabel("Xin chào, " + username + " (" + role + ")"),
+                BorderLayout.NORTH);
+        frame.add(mainPanel, BorderLayout.CENTER);
+        frame.add(footer, BorderLayout.SOUTH);
+        frame.setSize(640, 430);
+        frame.setLocationRelativeTo(null);
+        frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent event) {
+                if (!handedOff) {
+                    if (audioSocket != null) {
+                        audioSocket.close();
+                    }
+                    HomeUI.this.connection.close();
+                }
+            }
+        });
+    }
+
+    private void requestRoomList() {
+        sendRequest(PacketType.ROOM_LIST_REQ, new byte[0], "Đang tải danh sách lớp...");
+    }
+
+    private void createRoom() {
+        String roomName = roomNameField.getText().trim();
+        if (roomName.isEmpty()) {
+            showStatus("Vui lòng nhập tên lớp.", true);
+            return;
+        }
+        byte[] payload = PacketUtils.buildPayload(output -> output.writeUTF(roomName));
+        sendRequest(PacketType.CREATE_ROOM_REQ, payload, "Đang tạo lớp...");
+    }
+
+    private void joinSelectedRoom() {
+        RoomEntry selected = roomList.getSelectedValue();
+        if (selected == null || audioSocket == null) {
+            showStatus("Hãy chọn lớp cần tham gia.", true);
+            return;
+        }
+        byte[] payload = PacketUtils.buildPayload(output -> {
+            output.writeInt(selected.info().roomId());
+            output.writeInt(audioSocket.getLocalPort());
+        });
+        joiningRoom = selected;
+        joinButton.setEnabled(false);
+        sendRequest(PacketType.JOIN_ROOM_REQ, payload, "Đang tham gia lớp...");
+    }
+
+    private void sendRequest(byte type, byte[] payload, String message) {
+        try {
+            connection.send(type, payload);
+            showStatus(message, false);
+        } catch (IOException e) {
+            showStatus("Không gửi được yêu cầu: " + e.getMessage(), true);
+        }
+    }
+
+    private void onPacket(Packet packet) {
+        if (packet.getType() == PacketType.USER_LIST) {
+            synchronized (joinPacketLock) {
+                if (classroom != null) {
+                    classroom.acceptPacket(packet);
+                    return;
+                }
+                if (joiningRoom != null) {
+                    earlyMemberPackets.add(packet);
+                    return;
+                }
+            }
+        }
+        try {
+            switch (packet.getType()) {
+                case PacketType.ROOM_LIST_RES -> {
+                    List<RoomInfo> rooms = readRoomList(packet);
+                    SwingUtilities.invokeLater(() -> displayRooms(rooms));
+                }
+                case PacketType.CREATE_ROOM_RES -> {
+                    int ok;
+                    String message;
+                    int roomId;
+                    try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
+                        ok = input.readUnsignedByte();
+                        message = input.readUTF();
+                        roomId = input.readInt();
+                    }
+                    int response = ok;
+                    String responseMessage = message;
+                    int createdRoomId = roomId;
+                    SwingUtilities.invokeLater(() -> {
+                        showStatus(response == 1
+                                ? responseMessage + " (mã " + createdRoomId + ")"
+                                : responseMessage, response == 0);
+                        if (response == 1) {
+                            roomNameField.setText("");
+                            requestRoomList();
+                        }
+                    });
+                }
+                case PacketType.JOIN_ROOM_RES -> {
+                    int ok;
+                    String message;
+                    try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
+                        ok = input.readUnsignedByte();
+                        message = input.readUTF();
+                    }
+                    SwingUtilities.invokeLater(() -> {
+                        RoomEntry joined = joiningRoom;
+                        joiningRoom = null;
+                        if (ok == 1 && joined != null) {
+                            handedOff = true;
+                            List<Packet> buffered;
+                            synchronized (joinPacketLock) {
+                                classroom = new ClassroomUI(connection, username, role,
+                                        joined.info().roomId(), joined.info().roomName(),
+                                        audioSocket, serverIp);
+                                buffered = new ArrayList<>(earlyMemberPackets);
+                                earlyMemberPackets.clear();
+                            }
+                            for (Packet earlyPacket : buffered) {
+                                classroom.acceptPacket(earlyPacket);
+                            }
+                            frame.dispose();
+                        } else {
+                            joinButton.setEnabled(connectionAlive
+                                    && roomList.getSelectedValue() != null
+                                    && audioSocket != null);
+                            showStatus(message, true);
+                        }
+                    });
+                }
+                case PacketType.ERROR -> {
+                    String message;
+                    try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
+                        message = input.readUTF();
+                    }
+                    SwingUtilities.invokeLater(() -> showStatus(message, true));
+                }
+                default -> {
+                    // Other packet types are handled by the active screen.
+                }
+            }
+        } catch (IOException e) {
+            SwingUtilities.invokeLater(() -> showStatus("Phản hồi máy chủ không hợp lệ.", true));
+        }
+    }
+
+    private static List<RoomInfo> readRoomList(Packet packet) throws IOException {
+        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
+            int count = input.readInt();
+            if (count < 0 || count > 100_000) {
+                throw new IOException("Số lượng lớp không hợp lệ: " + count);
+            }
+            List<RoomInfo> rooms = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                rooms.add(new RoomInfo(
+                        input.readInt(),
+                        input.readUTF(),
+                        input.readUTF(),
+                        input.readInt()));
+            }
+            return rooms;
+        }
+    }
+
+    private void displayRooms(List<RoomInfo> rooms) {
+        roomModel.clear();
+        for (RoomInfo room : rooms) {
+            roomModel.addElement(new RoomEntry(room));
+        }
+        showStatus("Đã tải " + rooms.size() + " lớp.", false);
+    }
+
+    private void showStatus(String message, boolean error) {
+        statusLabel.setText(message);
+        statusLabel.setForeground(error ? Color.RED : Color.DARK_GRAY);
+    }
+
+    private void disableRoomActions() {
+        createRoomButton.setEnabled(false);
+        refreshButton.setEnabled(false);
+        joinButton.setEnabled(false);
+    }
+
+    private record RoomEntry(RoomInfo info) {
+        @Override
+        public String toString() {
+            return info.roomId() + " — " + info.roomName() + " — "
+                    + info.teacherUsername() + " — " + info.memberCount();
+        }
+    }
+}

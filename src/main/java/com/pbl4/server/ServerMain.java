@@ -2,7 +2,6 @@ package com.pbl4.server;
 
 import com.pbl4.common.Protocol;
 import com.pbl4.server.db.DatabaseManager;
-import com.pbl4.server.db.InMemoryDatabaseManager;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -61,9 +60,7 @@ public class ServerMain {
 
         int port = (args.length > 0) ? Integer.parseInt(args[0]) : Protocol.TCP_PORT;
 
-        // ⚠️ TV3: đổi dòng dưới thành new SqliteDatabaseManager("pbl4.db") khi SQLite xong.
-        //    Không phải sửa chỗ nào khác — cả hai cùng cài đặt interface DatabaseManager.
-        DatabaseManager db = new InMemoryDatabaseManager();
+        DatabaseManager db = new DatabaseManager("pbl4.db");
 
         RoomManager rooms = new RoomManager();
         ServerMain server = new ServerMain(port, rooms, db);
