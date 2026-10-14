@@ -1,5 +1,11 @@
 package com.pbl4.client.ui;
 
+import com.pbl4.client.media.AudioPlayer;
+import com.pbl4.client.media.AudioRecorder;
+import com.pbl4.client.media.JitterBuffer;
+import com.pbl4.client.media.MediaStats;
+import com.pbl4.client.media.ScreenCapturer;
+import com.pbl4.client.media.ScreenReceiver;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
@@ -18,30 +24,38 @@ import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
+import java.awt.AWTException;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-import java.util.function.Consumer;
 
-/** User interface for a joined online classroom. */
+/**
+ * User interface for a joined online classroom.
+ */
 public class ClassroomUI {
 
-    /** Adapter implemented by the audio module; implementations live with TV2's audio code. */
+    /**
+     * Adapter implemented by the audio module; implementations live with TV2's audio code.
+     */
     public interface AudioPlayerControl {
         int start() throws Exception;
 
         void stop();
     }
 
-    /** Adapter implemented by the audio module; implementations live with TV2's audio code. */
+    /**
+     * Adapter implemented by the audio module; implementations live with TV2's audio code.
+     */
     public interface AudioRecorderControl {
         void start(String serverIp, int serverPort, int roomId) throws Exception;
 
@@ -65,7 +79,8 @@ public class ClassroomUI {
     private final JTextArea chatArea = new JTextArea(3, 22);
     private final JTextField chatInput = new JTextField(16);
     private final JLabel statusLabel = new JLabel("Đã vào lớp.");
-    private volatile Consumer<Packet> screenFrameListener = packet -> { };
+    private volatile ScreenCapturer screenCapturer;
+    private volatile boolean screenSendFailed;
 
     private boolean micOn;
     private boolean sharing;
@@ -73,7 +88,8 @@ public class ClassroomUI {
 
     public ClassroomUI(ServerConnection connection, String username, String role,
                        int roomId, String roomName, DatagramSocket audioSocket, String serverIp) {
-        this(connection, username, role, roomId, roomName, audioSocket, serverIp, null, null);
+        this(connection, username, role, roomId, roomName, audioSocket, serverIp,
+                createAudioPlayer(audioSocket), createAudioRecorder(audioSocket));
     }
 
     public ClassroomUI(ServerConnection connection, String username, String role,
@@ -93,6 +109,9 @@ public class ClassroomUI {
         connection.setDisconnectListener(cause -> SwingUtilities.invokeLater(() -> {
             inRoom = false;
             stopAudioDevices();
+            stopScreenCapturer();
+            sharing = false;
+            shareButton.setText("Chia sẻ màn hình");
             disableControls();
             showStatus("Mất kết nối máy chủ: " + cause.getMessage(), true);
         }));
@@ -104,10 +123,47 @@ public class ClassroomUI {
         frame.setVisible(true);
     }
 
-    /** Registers TV2's screen-frame receiver; it is called from the network thread. */
-    @SuppressWarnings("unused")
-    public void setScreenFrameListener(Consumer<Packet> listener) {
-        screenFrameListener = Objects.requireNonNull(listener, "listener");
+    private static AudioPlayerControl createAudioPlayer(DatagramSocket socket) {
+        if (socket == null) {
+            return null;
+        }
+        AudioPlayer player = new AudioPlayer(socket, new JitterBuffer(), new MediaStats());
+        return new AudioPlayerControl() {
+            @Override
+            public int start() throws Exception {
+                player.start();
+                return socket.getLocalPort();
+            }
+
+            @Override
+            public void stop() {
+                player.stop();
+            }
+        };
+    }
+
+    private static AudioRecorderControl createAudioRecorder(DatagramSocket socket) {
+        if (socket == null) {
+            return null;
+        }
+        return new AudioRecorderControl() {
+            private AudioRecorder recorder;
+
+            @Override
+            public void start(String serverIp, int serverPort, int roomId) throws Exception {
+                if (recorder == null) {
+                    recorder = new AudioRecorder(socket, InetAddress.getByName(serverIp), serverPort);
+                }
+                recorder.start(roomId);
+            }
+
+            @Override
+            public void stop() {
+                if (recorder != null) {
+                    recorder.stop();
+                }
+            }
+        };
     }
 
     private void buildWindow(String username) {
@@ -157,6 +213,7 @@ public class ClassroomUI {
             @Override
             public void windowClosed(WindowEvent event) {
                 ClassroomUI.this.stopAudioDevices();
+                ClassroomUI.this.stopScreenCapturer();
                 if (ClassroomUI.this.audioSocket != null) {
                     ClassroomUI.this.audioSocket.close();
                 }
@@ -223,30 +280,75 @@ public class ClassroomUI {
             return;
         }
         if (sharing) {
-            if (sendRoomCommand(PacketType.SCREEN_STOP, "Đã dừng chia sẻ màn hình.")) {
-                sharing = false;
-                shareButton.setText("Chia sẻ màn hình");
-            }
+            stopScreenCapturer();
+            sharing = false;
+            shareButton.setText("Chia sẻ màn hình");
+            sendRoomCommand("Đã dừng chia sẻ màn hình.");
             return;
         }
 
-        if (!sendRoomCommand(PacketType.SCREEN_START, "Đang bắt đầu chia sẻ...")) {
+        ScreenCapturer capturer;
+        try {
+            capturer = new ScreenCapturer(this::sendScreenFrame, null);
+        } catch (AWTException | RuntimeException e) {
+            showStatus("Không thể khởi tạo chia sẻ màn hình: " + e.getMessage(), true);
             return;
         }
-        sharing = true;
-        shareButton.setText("Dừng chia sẻ màn hình");
-        showStatus("Đã gửi yêu cầu bắt đầu chia sẻ.", false);
-    }
 
-    private boolean sendRoomCommand(byte type, String status) {
         try {
             byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
-            connection.send(type, payload);
+            connection.send(PacketType.SCREEN_START, payload);
+            screenSendFailed = false;
+            screenCapturer = capturer;
+            capturer.start();
+            sharing = true;
+            shareButton.setText("Dừng chia sẻ màn hình");
+            showStatus("Đang chia sẻ màn hình.", false);
+        } catch (IOException | RuntimeException e) {
+            capturer.stop();
+            screenCapturer = null;
+            try {
+                byte[] stopPayload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+                connection.send(PacketType.SCREEN_STOP, stopPayload);
+            } catch (IOException stopException) {
+                e.addSuppressed(stopException);
+            }
+            showStatus("Không thể bắt đầu chia sẻ màn hình: " + e.getMessage(), true);
+        }
+    }
+
+    private void sendScreenFrame(byte[] jpeg) {
+        if (screenSendFailed) {
+            return;
+        }
+        try {
+            connection.send(PacketType.SCREEN_FRAME, jpeg);
+        } catch (IOException e) {
+            screenSendFailed = true;
+            SwingUtilities.invokeLater(() -> {
+                stopScreenCapturer();
+                sharing = false;
+                shareButton.setText("Chia sẻ màn hình");
+                showStatus("Không gửi được hình ảnh màn hình: " + e.getMessage(), true);
+            });
+        }
+    }
+
+    private void stopScreenCapturer() {
+        ScreenCapturer current = screenCapturer;
+        screenCapturer = null;
+        if (current != null) {
+            current.stop();
+        }
+    }
+
+    private void sendRoomCommand(String status) {
+        try {
+            byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+            connection.send(PacketType.SCREEN_STOP, payload);
             showStatus(status, false);
-            return true;
         } catch (IOException e) {
             showStatus("Không gửi được yêu cầu: " + e.getMessage(), true);
-            return false;
         }
     }
 
@@ -288,8 +390,9 @@ public class ClassroomUI {
                 connection.send(PacketType.AUDIO_OFF, audioOffPayload);
             }
             if (sharing) {
-                sendRoomCommand(PacketType.SCREEN_STOP, "Đang rời phòng...");
+                stopScreenCapturer();
                 sharing = false;
+                sendRoomCommand("Đang rời phòng...");
             }
             byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
             connection.send(PacketType.LEAVE_ROOM_REQ, payload);
@@ -305,7 +408,12 @@ public class ClassroomUI {
                     List<String> members = readMembers(packet);
                     SwingUtilities.invokeLater(() -> displayMembers(members));
                 }
-                case PacketType.SCREEN_FRAME -> screenFrameListener.accept(packet);
+                case PacketType.SCREEN_FRAME -> {
+                    BufferedImage image = ScreenReceiver.decode(packet.getPayload());
+                    if (image != null) {
+                        SwingUtilities.invokeLater(() -> screenPanel.setImage(image));
+                    }
+                }
                 case PacketType.SCREEN_START -> {
                     String teacher = readTeacher(packet);
                     SwingUtilities.invokeLater(() ->
@@ -313,7 +421,13 @@ public class ClassroomUI {
                 }
                 case PacketType.SCREEN_STOP -> {
                     String message = readScreenStopMessage(packet);
-                    SwingUtilities.invokeLater(() -> showStatus(message, false));
+                    SwingUtilities.invokeLater(() -> {
+                        stopScreenCapturer();
+                        sharing = false;
+                        shareButton.setText("Chia sẻ màn hình");
+                        screenPanel.setImage(null);
+                        showStatus(message, false);
+                    });
                 }
                 case PacketType.CHAT_TEXT -> {
                     String message = readChat(packet);
@@ -326,6 +440,7 @@ public class ClassroomUI {
                     SwingUtilities.invokeLater(() -> {
                         if (sharing && message.toLowerCase(java.util.Locale.ROOT)
                                 .contains("chi giao vien")) {
+                            stopScreenCapturer();
                             sharing = false;
                             shareButton.setText("Chia sẻ màn hình");
                         }
