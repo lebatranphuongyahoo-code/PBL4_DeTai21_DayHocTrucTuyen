@@ -120,3 +120,100 @@
 - **Đánh đổi.** Nếu kiểm tra ở giao diện client thì code đơn giản hơn, nhưng **chỉ cần sửa client
   hoặc dùng công cụ khác gửi gói là qua được toàn bộ kiểm tra**. Đây là đánh đổi bắt buộc phải
   chọn phía server — kiểm tra phải nằm ở nơi duy nhất đáng tin, tức là nơi giữ dữ liệu.
+
+---
+
+## TV2 · `client/media/AudioConfig` — hợp đồng tham số âm thanh (bước 4.1)
+
+- **Cấu trúc.** Một lớp chỉ chứa hằng số, không có trạng thái: `SAMPLE_RATE = 16.000 Hz`,
+  `SAMPLE_SIZE_BITS = 16`, `CHANNELS = 1`, `FRAME_MS = 20`, và ba hằng số **suy ra** từ chúng là
+  `CHUNK_BYTES = 640`, `SAMPLES_PER_CHUNK = 320`, `PACKETS_PER_SECOND = 50`. Có thêm `FORMAT`
+  kiểu `AudioFormat` để mở thẳng `SourceDataLine`/`TargetDataLine`.
+- **Thiết lập.** Phép suy ra là `16000 × 2 byte × 0,02 giây = 640 byte`. Ba hằng số này **không
+  được viết tay** mà tính từ ba hằng số gốc, vì viết tay thì sửa 16 kHz thành 44,1 kHz sẽ quên
+  sửa 640 và lỗi chỉ hiện ra khi đã ghép với server.
+- **Quy trình.** Cả `AudioRecorder` (phía gửi) lẫn `AudioPlayer` (phía nhận) đều đọc từ lớp này,
+  nên đổi một chỗ là đổi cả hai phía. Có hàm `selfCheck()` đối chiếu lại toàn bộ hằng số lúc chạy.
+- **Đánh đổi.** 16 kHz chỉ tái hiện được tới 8 kHz (định lý Nyquist–Shannon), tức là **mất** phần
+  trên 8 kHz của giọng nói. Nhưng dải tiếng nói chỉ cần 300–3.400 Hz, và 16 kHz cho ra **256 kbps**
+  thay vì 705 kbps của 44,1 kHz. Chọn 16 kHz là đổi độ trung thực không cần thiết lấy **băng thông
+  giảm gần 3 lần** cho một lớp 30 người.
+
+---
+
+## TV2 · `client/media/JitterBuffer` — đệm làm phẳng dao động (bước 4.2)
+
+- **Cấu trúc.** Một `ArrayBlockingQueue<byte[]>` sức chứa **10 gói**, một ngưỡng `prebuffer = 3`,
+  cờ `prebuffered`, và hai biến đếm (`droppedCount`, `peakSize`). Đây là cầu nối
+  **producer–consumer** giữa luồng nhận UDP và luồng phát ra loa.
+- **Thiết lập.** Sức chứa 10 gói = 200 ms, prebuffer 3 gói = **60 ms độ trễ thêm**. Hàm `put()`
+  **không bao giờ chặn** — đây là ràng buộc cứng, xem phần đánh đổi.
+- **Quy trình.** Luồng nhận `put()` gói vào; luồng phát `take()` ra. Chưa đủ 3 gói thì `take()`
+  trả `null` (chưa cho phát). Khi đầy: `poll()` bỏ **gói cũ nhất** rồi đưa gói mới vào.
+- **Đánh đổi.** Sức chứa 1.000 gói sẽ "chịu dao động tốt" nhưng là **cái bẫy**: hàng đợi đầy dần
+  khi mạng chậm và độ trễ tăng vô hạn — người nghe đang nghe chuyện của nửa phút trước. Với thoại
+  trực tiếp, **gói mới quan trọng hơn gói cũ**, nên phải có trần và phải bỏ gói cũ. Đo thực tế ở
+  Chặng 1: đầu vào dao động **0–30 ms**, đầu ra đều **21,9 ms**, và 100.000 lần `put()` khi đã đầy
+  không hề treo (31 ms).
+
+---
+
+## TV2 · `client/media/AudioPlayer` — ba luồng nghe thoại (bước 4.3)
+
+- **Cấu trúc.** Ba luồng daemon: `audio-receiver` (nhận UDP → tách `roomId`/`seqNo` → đẩy PCM vào
+  jitter buffer), `audio-player` (lấy PCM → ghi ra `SourceDataLine`), `audio-stats` (in số liệu).
+  Trạng thái: `maxSeqSeen`, `packetsReceived`, `packetsLost`, `packetsOutOfOrder` — tất cả đều
+  là `AtomicLong`.
+- **Thiết lập.** **Một `DatagramSocket` dùng chung với `AudioRecorder`** (xem phần đánh đổi).
+  `SourceDataLine` mở với đệm 8 khối = 160 ms. Cổng UDP do hệ điều hành cấp, **không phải 9001**.
+- **Quy trình.** Thứ tự bắt buộc khi bật mic: `player.start()` → gửi `AUDIO_ON` kèm cổng UDP →
+  `recorder.start()`. Phía nhận, mỗi gói đến làm `onAudioReceived(seq)`; gói có `seq` nhảy cách
+  được tính là mất, `seq` nhỏ hơn gói trước là sai thứ tự. Hàng đợi cạn thì ghi **im lặng** để giữ
+  nhịp loa thay vì để loa ngắt quãng.
+- **Đánh đổi.** **Vì sao phải dùng chung một socket:** server trừ người gửi bằng cách so **cặp
+  (IP, cổng UDP nguồn)** đã đăng ký lúc `JOIN_ROOM_REQ`. Nếu recorder và player mở hai socket
+  khác nhau, cổng mà server biết là của recorder, còn gói đến lại rơi vào socket của player —
+  và **người nói sẽ nghe thấy tiếng của chính mình (vọng)**. Đây là lỗi dễ ghép nhất của TV2 và
+  đã được kiểm chứng riêng ở Chặng 2. **Vì sao ba luồng mà không phải một:** gộp lại thì lúc ghi
+  ra loa (tốn vài ms) sẽ không đọc được socket, đệm nhận của hệ điều hành đầy và **gói bị mất âm
+  thầm** — không có cách nào phát hiện từ phía ứng dụng.
+
+---
+
+## TV2 · `client/media/ScreenCapturer` — chụp màn hình + nén JPEG (bước 5.1 & 5.2)
+
+- **Cấu trúc.** Một `Robot` chụp vùng màn hình chính, một `ImageWriter` **dùng lại** cùng
+  `ImageWriteParam`, một `ByteArrayOutputStream` dùng lại, và mẫu pixel `lastSamples` để dò thay
+  đổi. Luồng chụp tên `screen-capturer`.
+- **Thiết lập.** `10 FPS`, `quality 0.6`, bước lấy mẫu `4`, ngưỡng điểm ảnh đổi `24`,
+  tỉ lệ đổi tối thiểu `1%`.
+- **Quy trình.** Vòng lặp 5 bước: chụp → **dò thay đổi theo ngưỡng** (giống thì bỏ qua) → nén
+  JPEG → đẩy cho lớp gửi → **bù thời gian** để giữ đúng nhịp. Nhịp được tính bằng
+  `target = start + (i+1) × 100 ms` rồi chỉ ngủ **phần còn lại**, không dùng `sleep(100)` trần.
+- **Đánh đổi.** Nén JPEG quality 0,6 cho tỉ lệ **63 lần** (5,31 MB → 82,9 KB) và chỉ tốn **28 ms**
+  mỗi frame — chọn giữa thời gian nén và băng thông. Thí nghiệm 4 mức cho thấy rõ: quality 0,3
+  chỉ **60,5 KB** (4,96 Mbps) còn 0,9 lên **153,6 KB** (12,59 Mbps) — tức gấp **2,5 lần** băng
+  thông để đổi lấy độ nét mà **chữ trên slide đã đọc rõ từ mức 0,5**. Tối ưu bỏ frame trùng tiết
+  kiệm **97,5%** lưu lượng khi màn hình đứng yên (39/40 frame bị bỏ) — đây là con số quan trọng
+  nhất vì trong một tiết học phần lớn thời gian giáo viên đang nói, không thao tác gì.
+
+---
+
+## TV2 · Ba lỗi thật đã gặp và cách sửa (đọc kèm `docs/nhat-ky-loi.md`)
+
+- **Cấu trúc.** Ba lỗi nằm ở ba tầng khác nhau: một ở **bài đo** (bỏ qua mã kết quả trả về), một ở
+  **tranh chấp hai luồng** (`stop()` giải phóng writer khi luồng chụp còn đang dùng), một ở
+  **thuật toán** (so hash tuyệt đối quá nhạy với nhiễu của bộ tổng hợp hình ảnh).
+- **Thiết lập.** Cả ba đều **không** làm chương trình báo lỗi rõ ràng: lỗi 1 biểu hiện thành
+  "relay 300 gói nhưng 0 người nhận" (trông y như lỗi mạng), lỗi 2 chỉ in một dòng `NullPointerException`
+  rồi tự bỏ qua frame, lỗi 3 biểu hiện thành "tiết kiệm 0%" (trông y như tính năng không hoạt động).
+- **Quy trình.** Sửa theo thứ tự: (1) cho `login()`/`joinRoom()` **trả về `true/false`** và kiểm
+  tra bằng `check()` để lỗi hiện ngay tại chỗ; (2) `stop()` **không** giải phóng writer nữa, và
+  `encodeJpeg()` tự phục hồi nếu writer bị `null`; (3) đổi sang **so theo ngưỡng chịu lỗi** —
+  đếm tỉ lệ điểm ảnh đổi đáng kể thay vì so hash bằng nhau.
+- **Đánh đổi.** Ba cách sửa này đều chọn **phòng thủ nhiều lớp** thay vì sửa một dòng cho gọn:
+  giữ `check()` cho mọi mã trả về tốn thêm vài dòng test nhưng **không bao giờ che lỗi nghiệp vụ**;
+  giữ nhánh tự phục hồi trong `encodeJpeg()` là code "không bao giờ chạy tới" nhưng đổi lại **lỗi
+  ở lớp lắp ghép không thể làm chết việc chia sẻ màn hình**. Đo được bằng số: ngưỡng 1% nằm cao
+  hơn nhiễu thật **14–800 lần** (nhiễu đo được chỉ 0,0012%–0,0723%), nên vẫn bắt được thay đổi
+  thật mà không gửi frame thừa.
