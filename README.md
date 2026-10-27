@@ -123,13 +123,13 @@ giật, và server in ra số frame đã bỏ của bạn đó.
 | File | Nội dung |
 |---|---|
 | `common/Protocol.java` | Cổng 9000/9001, `MAX_PAYLOAD`, layout gói UDP, hằng số pool |
-| `common/PacketType.java` | Mã byte của 18 loại gói, đúng bảng 1.5.3 |
+| `common/PacketType.java` | Mã byte của 19 loại gói, đúng bảng 1.5.3 |
 | `common/Packet.java` | Đối tượng gói bất biến |
 | `common/PacketUtils.java` | `encode` / `sendPacket` / `readPacket` + `buildPayload` |
 | `common/RoomInfo.java` | Thông tin lớp cho `ROOM_LIST_RES` |
 | `common/Sha256.java` | Băm mật khẩu phía client |
 | `server/ServerMain.java` | ServerSocket 9000, thread pool 50, vòng accept, thống kê định kỳ |
-| `server/ClientHandler.java` | Đọc gói, định tuyến 18 loại, **một luồng ghi duy nhất**, 2 hàng đợi |
+| `server/ClientHandler.java` | Đọc gói, định tuyến 19 loại, **một luồng ghi duy nhất**, 2 hàng đợi |
 | `server/Room.java` | Thành viên + `ReentrantLock` riêng + broadcast sao-chép-rồi-nhả-khoá |
 | `server/RoomManager.java` | `ConcurrentHashMap` các lớp, dọn lớp rỗng |
 | `server/AudioRelayServer.java` | Relay UDP 9001, **trừ người gửi**, thống kê mỗi 100 gói |
