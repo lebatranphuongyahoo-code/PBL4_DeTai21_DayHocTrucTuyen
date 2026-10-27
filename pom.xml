@@ -71,6 +71,41 @@
                 </configuration>
             </plugin>
 
+            <!--
+                Jar "beo": gom ca sqlite-jdbc vao de chay duoc bang `java -jar` tren may khong
+                cai Maven. KHONG co plugin nay thi jar chi chua code cua minh va server sap ngay
+                khi khoi dong voi "No suitable driver found for jdbc:sqlite".
+                Chu y: jar KHONG chay duoc client bang -jar (Main-Class la ServerMain);
+                chay client bang `java -cp <jar> com.pbl4.client.ui.LoginUI [ip] [port]`.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.5.1</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <!-- Bo chu ky cua thu vien: gop lai jar se lam chu ky sai. -->
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
         </plugins>
     </build>
 

@@ -57,12 +57,27 @@ mvn -q exec:java -Dexec.mainClass=com.pbl4.tools.LoadTest
 mvn exec:java
 ```
 
-### Chạy server bằng jar
+### Chạy server và client bằng jar (cách dùng khi demo)
+
+`mvn package` giờ tạo **jar đủ thư viện** (đã gộp `sqlite-jdbc` bằng shade plugin, ~12 MB),
+nên chạy được trên máy không cài Maven. Bản `original-*.jar` là jar mỏng chỉ có code của mình —
+**không dùng bản đó**, server sẽ báo `No suitable driver found for jdbc:sqlite`.
 
 ```bash
 mvn -q package
+
+# Cua so 1: server (tu tao file pbl4.db ngay thu muc dang chay)
 java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar
+
+# Cua so 2: giao dien client. Mac dinh noi toi 127.0.0.1:9000
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI
+
+# Client o may khac: truyen IP cua may chay server
+java -cp pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI 192.168.1.10 9000
 ```
+
+> Demo 2 máy: hai máy phải cùng mạng, và trên máy chạy server phải mở **TCP 9000** + **UDP 9001**
+> trong tường lửa. Nếu không mở UDP 9001 thì vào được lớp, thấy màn hình, nhưng **không nghe tiếng**.
 
 ### Client giả lập để test từng chức năng
 
