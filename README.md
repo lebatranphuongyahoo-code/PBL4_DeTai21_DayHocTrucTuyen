@@ -22,14 +22,17 @@ Phần việc trong repo này chia làm 3 khối, mỗi người sở hữu mộ
 
 - **JDK 21** (LTS). Kiểm tra: `javac -version` → phải ra `javac 21.x`.
 - **Maven 3.9+**. Kiểm tra: `mvn -version`.
-- ⚠️ **Máy này `JAVA_HOME` đang trống** nên `mvn` báo
-  `Could not find or load main class org.codehaus.plexus.classworlds.launcher.Launcher`.
-  Sửa bằng cách đặt biến môi trường `JAVA_HOME` trỏ tới thư mục JDK, ví dụ
-  `C:\Program Files\Java\jdk-21`. Trên Git Bash có thể đặt tạm cho từng lệnh:
+- ⚠️ Nếu `mvn` báo
+  `Could not find or load main class org.codehaus.plexus.classworlds.launcher.Launcher`
+  thì **không phải do thiếu `JAVA_HOME`** (mvn vẫn tự tìm được `java` trên PATH).
+  Nguyên nhân thật: trên Git Bash, script `mvn` truyền đường dẫn kiểu `/c/Users/...` cho JVM
+  Windows; nếu việc đổi đường dẫn bị chặn — tức `MSYS_NO_PATHCONV=1` hoặc
+  `MSYS2_ARG_CONV_EXCL=*` đang được đặt — JVM sẽ tìm `C:\c\Users\...` và không thấy file.
+  Cách sửa: bỏ hai biến đó cho riêng lệnh, hoặc dùng `mvn.cmd`.
   ```bash
-  JAVA_HOME="C:/Program Files/Java/jdk-21" mvn compile
+  env -u MSYS_NO_PATHCONV -u MSYS2_ARG_CONV_EXCL mvn -o clean package
   ```
-- ⚠️ Trên Git Bash, gõ `mvn` (script bash) sẽ lỗi classworlds — **dùng `mvn.cmd`**.
+- ⚠️ Trên Git Bash nếu vẫn lỗi, gõ `mvn.cmd` thay cho `mvn`.
 
 ---
 
@@ -117,22 +120,46 @@ giật, và server in ra số frame đã bỏ của bạn đó.
 | `server/AudioRelayServer.java` | Relay UDP 9001, **trừ người gửi**, thống kê mỗi 100 gói |
 | `tools/` | 4 công cụ kiểm thử (xem mục 2) |
 
-### Chưa xong — việc của TV3 và TV2
+### Đã nhận từ TV2 và TV3 (cập nhật 27/10/2026)
 
-| Việc | Ai | Ghi chú |
+| Nhóm | File | Ghi chú |
 |---|---|---|
-| `server/db/DatabaseManager` bản SQLite | TV3 | Hiện dùng `InMemoryDatabaseManager` (mất dữ liệu khi tắt server) |
-| `client/net/`, `client/ui/` | TV3 | Giao diện Swing + `ServerConnection` |
-| `client/media/` | TV2 | Mic, loa, chụp/giải mã màn hình, jitter buffer |
+| TV2 | `client/media/` — 7 file | `AudioConfig`, `AudioRecorder`, `AudioPlayer`, `JitterBuffer`, `ScreenCapturer`, `ScreenReceiver`, `MediaStats` |
+| TV3 | `client/net/` — 2 file | `ServerConnection`, `ClientListener` |
+| TV3 | `client/ui/` — 4 file | `LoginUI`, `HomeUI`, `ClassroomUI`, `ScreenPanel` |
+| TV3 | `server/db/DatabaseManager` | Đã thành **lớp SQLite thật** — xem mục 3.1 |
+| **Gộp 27/10** | `client/ui/ClassroomUI.java` | Merge `27ecf3a` của TV3 — nối UI với `client/media`; kèm 1 fix (xem 3.2) |
 
-**Cách thay DB thật:** sửa **một dòng** trong `ServerMain.main()`:
+> `27ecf3a` được commit **sau** khi PR #4 đã merge, nên trước đó `ClassroomUI` trên `main`
+> không import `client/media` — cả tầng media là code chết. Đã gộp trong `ab075bc`.
 
-```java
-// DatabaseManager db = new InMemoryDatabaseManager();     // ban tam
-DatabaseManager db = new SqliteDatabaseManager("pbl4.db"); // TV3 viet
-```
+### 3.2 Fix kèm theo khi gộp TV3: loa phải mở từ lúc vào lớp
 
-Không phải sửa chỗ nào khác, vì cả hai cùng cài đặt interface `DatabaseManager`.
+`AudioRelayServer` relay thoại cho **mọi** thành viên đã đăng ký cổng UDP (chỉ lọc theo
+`hasUdpAddress()`, **không** lọc theo mic bật/tắt). Nhưng bản gộp đầu tiên chỉ gọi
+`AudioPlayer.start()` **bên trong** `toggleMicrophone()`.
+
+⇒ Học sinh không bấm "Bật Mic" thì gói UDP vẫn tới cổng, nhưng **không có luồng nào đọc**
+socket → nghe như mất tiếng. Đã sửa trong `a4d9580`:
+
+- Constructor gọi `startAudioPlayback()`; lỗi loa chỉ hiện trạng thái, không làm sập phòng.
+- Tắt mic **chỉ** dừng `AudioRecorder`, không dừng `AudioPlayer`.
+- `AUDIO_ON` lấy cổng từ `audioSocket.getLocalPort()` thay vì `audioPlayer.start()`.
+
+### 3.1 Hợp đồng đã đổi: `DatabaseManager` không còn là interface
+
+`DatabaseManager` giờ là **lớp cụ thể** bọc SQLite: `new DatabaseManager("pbl4.db")`.
+`InMemoryDatabaseManager` đổi thành `extends DatabaseManager` và gọi `super(":memory:")`.
+`ServerMain.main()` gọi thẳng bản SQLite.
+
+Hệ quả cần nắm khi bảo vệ:
+
+- **Không còn "đổi một dòng"** như thiết kế ban đầu — CSDL đã gắn cứng trong `ServerMain`.
+- **Không có file `SqliteDatabaseManager`** như bảng 1.5.5 mô tả; chức năng nằm ngay trong
+  `DatabaseManager`. Nhóm cần xác nhận cách đặt tên này trước khi in báo cáo.
+- Muốn quay lại bản tạm trong RAM: sửa `ServerMain.main()` thành
+  `DatabaseManager db = new InMemoryDatabaseManager();` — vẫn biên dịch được vì lớp này kế thừa
+  `DatabaseManager`.
 
 ---
 
