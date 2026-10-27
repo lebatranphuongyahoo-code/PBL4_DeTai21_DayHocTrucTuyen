@@ -105,6 +105,7 @@ public class ClassroomUI {
         this.frame = new JFrame("Lớp " + roomName + " (" + roomId + ")");
 
         buildWindow(username);
+        startAudioPlayback();
         connection.setListener(this::onPacket);
         connection.setDisconnectListener(cause -> SwingUtilities.invokeLater(() -> {
             inRoom = false;
@@ -121,6 +122,25 @@ public class ClassroomUI {
         leaveButton.addActionListener(event -> leaveRoom());
         chatInput.addActionListener(event -> sendChat());
         frame.setVisible(true);
+    }
+
+    /**
+     * Mở loa ngay khi vào lớp.
+     *
+     * <p>Server relay thoại cho <b>mọi</b> thành viên đã đăng ký cổng UDP, không phân biệt
+     * người đó có bật mic hay không. Vì vậy nếu chỉ mở loa lúc bấm "Bật Mic" thì học sinh
+     * ngồi nghe sẽ không nhận được gì — gói UDP vẫn tới cổng nhưng không có luồng nào đọc.
+     * Nút mic chỉ điều khiển <i>đường gửi</i>; đường nhận luôn chạy từ lúc vào lớp.
+     */
+    private void startAudioPlayback() {
+        if (audioPlayer == null) {
+            return;
+        }
+        try {
+            audioPlayer.start();
+        } catch (Exception e) {
+            showStatus("Không mở được loa: " + e.getMessage(), true);
+        }
     }
 
     private static AudioPlayerControl createAudioPlayer(DatagramSocket socket) {
@@ -229,7 +249,6 @@ public class ClassroomUI {
         }
         if (micOn) {
             audioRecorder.stop();
-            audioPlayer.stop();
             micOn = false;
             micButton.setText("Bật Mic");
             try {
@@ -243,7 +262,8 @@ public class ClassroomUI {
         }
 
         try {
-            int udpPort = audioPlayer.start();
+            // Loa đã chạy từ lúc vào lớp; cổng UDP chính là cổng đã đăng ký trong JOIN_ROOM_REQ.
+            int udpPort = audioSocket != null ? audioSocket.getLocalPort() : -1;
             byte[] payload = PacketUtils.buildPayload(output -> {
                 output.writeInt(roomId);
                 output.writeInt(udpPort);
@@ -255,7 +275,6 @@ public class ClassroomUI {
             showStatus("Đã bật mic.", false);
         } catch (Exception e) {
             audioRecorder.stop();
-            audioPlayer.stop();
             try {
                 byte[] offPayload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
                 connection.send(PacketType.AUDIO_OFF, offPayload);
