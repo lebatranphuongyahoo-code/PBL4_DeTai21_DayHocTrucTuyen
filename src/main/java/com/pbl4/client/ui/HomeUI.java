@@ -1,5 +1,6 @@
 package com.pbl4.client.ui;
 
+import com.pbl4.client.media.MediaController;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
@@ -239,9 +240,21 @@ public class HomeUI {
                             handedOff = true;
                             List<Packet> buffered;
                             synchronized (joinPacketLock) {
+                                // Bộ máy media của TV2. Chỉ tạo được khi đã có socket UDP;
+                                // nếu lúc đăng nhập không mở được cổng thì mic và chia sẻ
+                                // màn hình sẽ không hoạt động, các phần khác vẫn chạy.
+                                MediaController media = audioSocket == null ? null
+                                        : new MediaController(audioSocket, jpeg -> {
+                                            try {
+                                                connection.send(PacketType.SCREEN_FRAME, jpeg);
+                                            } catch (IOException e) {
+                                                // Mất kết nối thì bỏ frame; luồng chụp vẫn chạy
+                                                // và sẽ được dừng khi rời lớp.
+                                            }
+                                        });
                                 classroom = new ClassroomUI(connection, username, role,
                                         joined.info().roomId(), joined.info().roomName(),
-                                        audioSocket, serverIp);
+                                        audioSocket, serverIp, media, media, media);
                                 buffered = new ArrayList<>(earlyMemberPackets);
                                 earlyMemberPackets.clear();
                             }

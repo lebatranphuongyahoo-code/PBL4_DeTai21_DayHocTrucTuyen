@@ -1,5 +1,6 @@
 package com.pbl4.client.ui;
 
+import com.pbl4.client.media.ScreenReceiver;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
@@ -23,6 +24,7 @@ import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.DatagramSocket;
@@ -48,10 +50,22 @@ public class ClassroomUI {
         void stop();
     }
 
+    /**
+     * Adapter implemented by the screen module; the implementation lives with TV2's media code.
+     *
+     * <p>Giao diện chỉ biết "bật chụp" và "tắt chụp", không biết gì về Robot, JPEG hay FPS.</p>
+     */
+    public interface ScreenShareControl {
+        void startCapture() throws Exception;
+
+        void stopCapture();
+    }
+
     private final ServerConnection connection;
     private final DatagramSocket audioSocket;
     private final AudioPlayerControl audioPlayer;
     private final AudioRecorderControl audioRecorder;
+    private final ScreenShareControl screenShare;
     private final String serverIp;
     private final int roomId;
     private final String role;
@@ -73,12 +87,24 @@ public class ClassroomUI {
 
     public ClassroomUI(ServerConnection connection, String username, String role,
                        int roomId, String roomName, DatagramSocket audioSocket, String serverIp) {
-        this(connection, username, role, roomId, roomName, audioSocket, serverIp, null, null);
+        this(connection, username, role, roomId, roomName, audioSocket, serverIp, null, null, null);
     }
 
     public ClassroomUI(ServerConnection connection, String username, String role,
                        int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
                        AudioPlayerControl audioPlayer, AudioRecorderControl audioRecorder) {
+        this(connection, username, role, roomId, roomName, audioSocket, serverIp,
+                audioPlayer, audioRecorder, null);
+    }
+
+    /**
+     * @param screenShare bộ chụp màn hình của TV2; truyền {@code null} thì nút chia sẻ vẫn hiện
+     *                    nhưng bấm sẽ báo chưa nối được thiết bị
+     */
+    public ClassroomUI(ServerConnection connection, String username, String role,
+                       int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
+                       AudioPlayerControl audioPlayer, AudioRecorderControl audioRecorder,
+                       ScreenShareControl screenShare) {
         this.connection = Objects.requireNonNull(connection, "connection");
         this.audioSocket = audioSocket;
         this.roomId = roomId;
@@ -86,6 +112,8 @@ public class ClassroomUI {
         this.serverIp = Objects.requireNonNull(serverIp, "serverIp");
         this.audioPlayer = audioPlayer;
         this.audioRecorder = audioRecorder;
+        this.screenShare = screenShare;
+        this.screenFrameListener = this::renderScreenFrame;
         this.frame = new JFrame("Lớp " + roomName + " (" + roomId + ")");
 
         buildWindow(username);
@@ -156,6 +184,9 @@ public class ClassroomUI {
 
             @Override
             public void windowClosed(WindowEvent event) {
+                // Tắt thiết bị trước khi đóng socket/kết nối, nếu không luồng chụp và luồng
+                // thu sẽ ghi lên tài nguyên đã đóng.
+                ClassroomUI.this.stopScreenCapture();
                 ClassroomUI.this.stopAudioDevices();
                 if (ClassroomUI.this.audioSocket != null) {
                     ClassroomUI.this.audioSocket.close();
@@ -223,6 +254,8 @@ public class ClassroomUI {
             return;
         }
         if (sharing) {
+            // Ngừng chụp TRƯỚC khi báo server, để không còn frame nào bay đi sau khi lớp tắt cờ.
+            stopScreenCapture();
             if (sendRoomCommand(PacketType.SCREEN_STOP, "Đã dừng chia sẻ màn hình.")) {
                 sharing = false;
                 shareButton.setText("Chia sẻ màn hình");
@@ -230,12 +263,49 @@ public class ClassroomUI {
             return;
         }
 
+        if (screenShare == null) {
+            showStatus("Chưa nối được bộ chụp màn hình.", true);
+            return;
+        }
         if (!sendRoomCommand(PacketType.SCREEN_START, "Đang bắt đầu chia sẻ...")) {
             return;
         }
         sharing = true;
         shareButton.setText("Dừng chia sẻ màn hình");
-        showStatus("Đã gửi yêu cầu bắt đầu chia sẻ.", false);
+
+        // Server chỉ chuyển tiếp frame khi cờ chia sẻ của lớp đã bật, mà cờ đó bật lúc server
+        // xử lý xong SCREEN_START. Vì vậy phải gửi lệnh trước rồi mới bật chụp.
+        try {
+            screenShare.startCapture();
+            showStatus("Đang chia sẻ màn hình.", false);
+        } catch (Exception e) {
+            sharing = false;
+            shareButton.setText("Chia sẻ màn hình");
+            sendRoomCommand(PacketType.SCREEN_STOP, "Không chia sẻ được màn hình.");
+            showStatus("Không chụp được màn hình: " + e.getMessage(), true);
+        }
+    }
+
+    /** Dừng bộ chụp nếu đã nối; an toàn khi gọi nhiều lần. */
+    private void stopScreenCapture() {
+        if (screenShare != null) {
+            screenShare.stopCapture();
+        }
+    }
+
+    /**
+     * Vẽ frame nhận được lên {@link ScreenPanel}.
+     *
+     * <p>Hàm chạy trên <b>luồng mạng</b> (xem {@link #onPacket}), nên phần cập nhật giao diện
+     * được đẩy sang EDT bằng {@code invokeLater}. Frame hỏng bị bỏ qua và giữ lại frame cũ —
+     * thà chậm một frame còn hơn nháy đen.</p>
+     */
+    private void renderScreenFrame(Packet packet) {
+        BufferedImage image = ScreenReceiver.decode(packet.getPayload());
+        if (image == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> screenPanel.setImage(image));
     }
 
     private boolean sendRoomCommand(byte type, String status) {
@@ -288,6 +358,7 @@ public class ClassroomUI {
                 connection.send(PacketType.AUDIO_OFF, audioOffPayload);
             }
             if (sharing) {
+                stopScreenCapture();
                 sendRoomCommand(PacketType.SCREEN_STOP, "Đang rời phòng...");
                 sharing = false;
             }
@@ -313,7 +384,11 @@ public class ClassroomUI {
                 }
                 case PacketType.SCREEN_STOP -> {
                     String message = readScreenStopMessage(packet);
-                    SwingUtilities.invokeLater(() -> showStatus(message, false));
+                    SwingUtilities.invokeLater(() -> {
+                        // Xoá frame cũ, trả khung hình về dòng chữ "Chưa có ai chia sẻ màn hình".
+                        screenPanel.setImage(null);
+                        showStatus(message, false);
+                    });
                 }
                 case PacketType.CHAT_TEXT -> {
                     String message = readChat(packet);
