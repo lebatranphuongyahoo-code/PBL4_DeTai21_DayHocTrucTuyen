@@ -145,15 +145,28 @@ public final class RoomHandler {
             c.sendError("Ban chua o trong lop nao");
             return;
         }
+        Messages.ChatText msg;
         try {
-            Messages.ChatText.decode(packet.getPayload());
+            msg = Messages.ChatText.decode(packet.getPayload());
         } catch (IOException e) {
             c.sendError("Tin nhan khong hop le");
             return;
         }
-        // Chuyển tiếp nguyên payload cho cả lớp, kể cả người gửi, để giao diện của họ
-        // hiển thị được tin nhắn của chính mình.
-        room.broadcastControl(PacketType.CHAT_TEXT, packet.getPayload());
+        if (msg.roomId() != room.getRoomId()) {
+            c.sendError("Ban khong o trong lop " + msg.roomId());
+            return;
+        }
+        String text = msg.text().strip();
+        if (text.isEmpty()) {
+            return;
+        }
+        if (text.length() > 1000) {
+            c.sendError("Tin nhan toi da 1000 ky tu");
+            return;
+        }
+        // Chuyển tiếp cho cả lớp, kể cả người gửi, kèm tên người gửi ở đầu.
+        room.broadcastControl(PacketType.CHAT_TEXT,
+                new Messages.ChatText(room.getRoomId(), c.getUsername() + ": " + text).encode());
     }
 
     private Room currentRoom(ClientHandler c) {

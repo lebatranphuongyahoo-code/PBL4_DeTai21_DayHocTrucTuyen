@@ -219,4 +219,38 @@ class ServerRulesTest {
         assertNotNull(rooms.get(id));
         assertFalse(rooms.get(id).isSharing());
     }
+
+    // ==================================================================
+    // B5 — Chat có tên người gửi
+    // ==================================================================
+
+    @Test
+    @Timeout(20)
+    void chatIsPrefixedWithSender() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B5");
+        assertTrue(gv.join(id, 0));
+
+        Conn hs = client("minh", Protocol.ROLE_STUDENT);
+        assertTrue(hs.join(id, 0));
+
+        hs.send(PacketType.CHAT_TEXT, new Messages.ChatText(id, "  xin chao ").encode());
+        Packet p = gv.await(PacketType.CHAT_TEXT, 2000);
+        assertNotNull(p);
+        Messages.ChatText received = Messages.ChatText.decode(p.getPayload());
+        assertEquals(id, received.roomId());
+        assertEquals("minh: xin chao", received.text());
+    }
+
+    @Test
+    @Timeout(20)
+    void chatToOtherRoomRejected() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B5");
+        assertTrue(gv.join(id, 0));
+
+        gv.send(PacketType.CHAT_TEXT, new Messages.ChatText(id + 1, "alo").encode());
+        Packet err = gv.await(PacketType.ERROR, 2000);
+        assertNotNull(err);
+    }
 }
