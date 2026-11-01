@@ -241,3 +241,41 @@ ROOM_ID=388085
 [pool-1-thread-2] da dong ket noi | doc 3 goi | gui 60 frame | bo 0 frame
 ```
 
+
+---
+
+## Sau khi hoàn thành Bước 0–9 (01/11/2026)
+
+Danh sách commit của nhánh `refactor/chuan-hoa-cau-truc` so với `main`:
+
+```
+96f8b94 docs: KIEN_TRUC, GIAO_THUC, cap nhat README va kich ban demo sau refactor
+8e12121 refactor: xoa code chet, ScreenReceiver dung AtomicLong, them test JitterBuffer/AudioConfig [TV1 sua file cua TV2, TV3]
+df9d132 fix(client): Roi phong quay ve trang chu, giu ket noi (B8) [TV1 sua file cua TV3]
+9852fa6 refactor(client): AudioSession so huu socket UDP + mic + loa [TV1 sua file cua TV2, TV3]
+8e8243f docs: nhat ky loi B0-B7 theo mau (buoc 6.8)
+ec5b667 fix(tools): T0Demo cho don lop toi da 3s truoc khi check, chong flaky
+e4949ba fix(server): kiem tra dau vao dang ky/tao lop, requireLogin day du (B7)
+ccc3034 fix(server): relay UDP chi nhan tu thanh vien da bat mic (B6)
+d5dd10c fix(server): chat kem ten nguoi gui (B5)
+5b9f0c8 fix(server): giao vien roi lop thi tat chia se (B4)
+6704406 fix(server): chi giao vien chu lop duoc bat/tat/gui man hinh (B3)
+5e887ca fix(server): co closed trong Room chong phong ma khi vao/roi dong thoi (B2)
+782705b fix(server): mo lai lop tu CSDL khi vao, khong mo luc tao (B1)
+5faa90a refactor(server): tach ClientHandler thanh 4 handler, bo rawOutput
+454b492 refactor(db): DatabaseManager thanh interface, SqliteDatabaseManager, xoa InMemory [TV1 sua file cua TV3]
+69400fe refactor(client,tools): dung Messages trong UI va cong cu [TV1 sua file cua TV3]
+cd63f1f refactor(server): dung Messages trong ClientHandler va Room
+9b63dd7 refactor(common): them Messages - mot cho cho dinh dang payload + golden test
+139a6a8 refactor(server): ServerConfig, bind cong trong constructor; tool chay nhu ham; JUnit cho T0 va LoadTest [sua file TV2 viet]
+55313ed fix(tools): TestClient tu dang nhap, screen-send tao lop, do tre frame (B0)
+eb38f1e build: them JUnit 5, pin plugin, Launcher cho java -jar client
+d0578e6 docs: ghi moc ban dau truoc refactor
+```
+
+**Tổng: 22 commit. Kết quả kiểm tra cuối (9.1):** `mvn -o clean verify` → BUILD SUCCESS,
+**59/59 test JUnit** · `T0Demo` **20/20** · `LoadTest 10 5` **4/4** ·
+`buildPayload/payloadReader` chỉ còn trong `PacketUtils.java` và `Messages.java`.
+
+**Còn lại:** smoke GUI 14 bước (9.2 — cần bấm tay, ghi vào `docs/refactor/smoke-<ngay>.md`).
+**DỪNG — chờ Minh duyệt merge (Bước 10 chỉ làm khi Minh ghi "DUYỆT BƯỚC 10").**
