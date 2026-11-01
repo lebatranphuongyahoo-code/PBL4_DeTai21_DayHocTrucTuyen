@@ -13,6 +13,7 @@ import com.pbl4.server.db.DatabaseManager;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /** Xử lý tạo lớp, vào/rời lớp, liệt kê lớp và chat văn bản. */
 public final class RoomHandler {
@@ -36,9 +37,8 @@ public final class RoomHandler {
             return;
         }
 
-        // Cơ sở dữ liệu cấp mã phòng, rồi TV1 mở lớp đó trong RAM.
+        // Cơ sở dữ liệu cấp mã phòng; lớp chỉ mở trong RAM khi có người đầu tiên vào.
         int newRoomId = db.createRoom(roomName, c.getUsername());
-        rooms.createRoom(newRoomId, roomName, c.getUsername());
 
         c.sendControl(PacketType.CREATE_ROOM_RES,
                 new Messages.CreateRoomResponse(true, "Da tao lop " + roomName, newRoomId).encode());
@@ -53,16 +53,18 @@ public final class RoomHandler {
         int targetRoomId = req.roomId();
         int clientUdpPort = req.udpPort();
 
-        Room room = rooms.get(targetRoomId);
-        if (room == null) {
+        Optional<RoomInfo> found = db.findRoom(targetRoomId);
+        if (found.isEmpty()) {
             c.sendControl(PacketType.JOIN_ROOM_RES,
                     new Messages.StatusResponse(false, "Lop khong ton tai hoac da dong").encode());
             return;
         }
+        RoomInfo info = found.get();
 
         // Mỗi client chỉ ở trong MỘT phòng tại một thời điểm (mục 1.5.4).
         leaveCurrentRoom(c);
 
+        Room room = rooms.openIfAbsent(info);
         c.enterRoom(targetRoomId, clientUdpPort);
         room.addMember(c);
 

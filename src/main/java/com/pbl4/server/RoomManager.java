@@ -1,5 +1,7 @@
 package com.pbl4.server;
 
+import com.pbl4.common.RoomInfo;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -16,21 +18,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p><b>Vì sao roomId do cơ sở dữ liệu cấp:</b> hợp đồng quy định
  * {@code DatabaseManager.createRoom()} trả về {@code int roomId}. Nếu lớp này tự sinh mã riêng
  * thì hai không gian mã sẽ lệch nhau sau khi server khởi động lại. Vì vậy
- * {@link #createRoom(int, String, String)} nhận mã phòng từ bên ngoài truyền vào.</p>
+ * {@link #openIfAbsent(RoomInfo)} nhận thông tin phòng đã lưu từ cơ sở dữ liệu truyền vào.</p>
  */
 public class RoomManager {
 
     private final ConcurrentHashMap<Integer, Room> rooms = new ConcurrentHashMap<>();
 
-    /**
-     * Mở một lớp học đang hoạt động với mã phòng đã có.
-     *
-     * @return lớp vừa tạo, hoặc lớp đã tồn tại nếu mã phòng bị trùng
-     */
-    public Room createRoom(int roomId, String roomName, String teacherUsername) {
-        Room created = new Room(roomId, roomName, teacherUsername);
-        Room existing = rooms.putIfAbsent(roomId, created);
-        return (existing != null) ? existing : created;
+    /** Lấy lớp đang mở, hoặc mở lớp từ thông tin đã lưu nếu chưa mở. */
+    public Room openIfAbsent(RoomInfo info) {
+        return rooms.computeIfAbsent(info.roomId(),
+                id -> new Room(id, info.roomName(), info.teacherUsername()));
     }
 
     public Room get(int roomId) {
