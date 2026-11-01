@@ -28,11 +28,6 @@ public class ScreenPanel extends JPanel {
         repaint();
     }
 
-    /** Kept for callers using the earlier method name. */
-    public void setFrame(BufferedImage image) {
-        setImage(image);
-    }
-
     @Override
     protected void paintComponent(Graphics graphics) {
         super.paintComponent(graphics);

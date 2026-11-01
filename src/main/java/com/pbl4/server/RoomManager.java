@@ -3,7 +3,6 @@ package com.pbl4.server;
 import com.pbl4.common.RoomInfo;
 
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -59,10 +58,6 @@ public class RoomManager {
     /** Số lớp đang mở. */
     public int size() {
         return rooms.size();
-    }
-
-    public Collection<Room> allRooms() {
-        return rooms.values();
     }
 
     public List<Room> snapshotRooms() {

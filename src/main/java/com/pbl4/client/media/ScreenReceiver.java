@@ -35,8 +35,15 @@ public final class ScreenReceiver {
         // lớp tiện ích — không cho khởi tạo
     }
 
-    /** Số frame giải mã lỗi trong phiên — dùng cho bảng số liệu Chương 3. */
-    private static volatile long decodeFailures;
+    /**
+     * Số frame giải mã lỗi trong phiên — dùng cho bảng số liệu Chương 3.
+     *
+     * <p>Dùng {@link java.util.concurrent.atomic.AtomicLong} chứ không phải {@code volatile long}:
+     * {@code ++} trên {@code volatile} là đọc-ghi hai bước, hai luồng tăng đồng thời có thể mất
+     * một lần đếm — đúng lý do mà {@code MediaStats} đã giải thích.</p>
+     */
+    private static final java.util.concurrent.atomic.AtomicLong decodeFailures =
+            new java.util.concurrent.atomic.AtomicLong();
 
     /**
      * Giải mã một frame JPEG.
@@ -46,26 +53,26 @@ public final class ScreenReceiver {
      */
     public static BufferedImage decode(byte[] jpeg) {
         if (jpeg == null || jpeg.length < 4) {
-            decodeFailures++;
+            decodeFailures.incrementAndGet();
             return null;
         }
         // Kiểm tra magic number JPEG (FF D8) trước khi đưa vào ImageIO.
         // Rẻ hơn nhiều so với việc để ImageIO thử rồi thất bại, và tránh được
         // trường hợp dữ liệu rác làm ImageIO ném exception.
         if ((jpeg[0] & 0xFF) != 0xFF || (jpeg[1] & 0xFF) != 0xD8) {
-            decodeFailures++;
+            decodeFailures.incrementAndGet();
             return null;
         }
         try {
             BufferedImage image = ImageIO.read(new ByteArrayInputStream(jpeg));
             if (image == null) {
-                decodeFailures++;
+                decodeFailures.incrementAndGet();
             }
             return image;
         } catch (IOException | RuntimeException e) {
             // Bắt cả RuntimeException: ImageIO có thể ném IllegalArgumentException với
             // dữ liệu hỏng, và nó KHÔNG được phép làm chết luồng mạng.
-            decodeFailures++;
+            decodeFailures.incrementAndGet();
             return null;
         }
     }
@@ -80,11 +87,11 @@ public final class ScreenReceiver {
 
     /** Số frame đã giải mã lỗi kể từ lúc chạy. */
     public static long getDecodeFailures() {
-        return decodeFailures;
+        return decodeFailures.get();
     }
 
     public static void resetCounters() {
-        decodeFailures = 0;
+        decodeFailures.set(0);
     }
 
     /**

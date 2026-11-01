@@ -11,11 +11,9 @@ import java.awt.GraphicsDevice;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
 import java.awt.Robot;
-import java.awt.Toolkit;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.function.Consumer;
 
@@ -568,17 +566,5 @@ public class ScreenCapturer {
     public String toString() {
         return String.format("ScreenCapturer{%s, %d FPS, quality %.1f, tho %.1f MB/frame}",
                 getScreenSize(), fps, quality, rawFrameMb());
-    }
-
-    /** Tiện ích: so sánh hai mảng byte để biết frame có thay đổi thật hay không. */
-    static boolean sameBytes(byte[] a, byte[] b) {
-        return Arrays.equals(a, b);
-    }
-
-    /** Tiện ích: lấy kích thước màn hình theo inch để ước lượng nội dung hiển thị. */
-    static double screenDiagonalInches() {
-        Toolkit toolkit = Toolkit.getDefaultToolkit();
-        java.awt.Dimension size = toolkit.getScreenSize();
-        return Math.hypot(size.width, size.height) / toolkit.getScreenResolution();
     }
 }
