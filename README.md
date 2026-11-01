@@ -7,11 +7,14 @@ Phần việc trong repo này chia làm 3 khối, mỗi người sở hữu mộ
 | Thư mục | Người sở hữu | Nội dung |
 |---|---|---|
 | `com/pbl4/common/` | **TV1 (Minh)** | Hợp đồng giao thức — cả 3 cùng dùng |
+| `com/pbl4/common/msg/` | **TV1 (Minh)** | Record + encode/decode cho mọi payload (`Messages`) |
 | `com/pbl4/server/` | **TV1 (Minh)** | Server đa luồng, phòng học, relay thoại + màn hình |
-| `com/pbl4/server/db/` | **TV3** | SQLite: tài khoản, lớp học |
+| `com/pbl4/server/handler/` | **TV1 (Minh)** | 4 handler nghiệp vụ: Auth, Room, Screen, Audio |
+| `com/pbl4/server/db/` | **TV3** | SQLite: tài khoản, lớp học (`DatabaseManager` + bản cài SQLite) |
 | `com/pbl4/client/net/`, `client/ui/` | **TV3** | Kết nối mạng phía client, giao diện Swing |
 | `com/pbl4/client/media/` | **TV2** | Mic, loa, chụp màn hình, jitter buffer |
 | `com/pbl4/tools/` | **TV1** | Công cụ kiểm thử — **không nằm trong sản phẩm** |
+| `src/test/` | **TV1** | 59 test JUnit: hợp đồng, luật server, phòng học, jitter buffer |
 
 > **Quy tắc sở hữu file:** muốn sửa file của người khác thì nhắn trong nhóm trước, và ghi rõ
 > trong Summary commit (`[TV3 sua file cua TV1]`). Không tự sửa rồi im lặng.
@@ -42,9 +45,9 @@ Phần việc trong repo này chia làm 3 khối, mỗi người sở hữu mộ
 # 1. Biên dịch
 mvn -q compile
 
-# 2. Kiểm tra hợp đồng giao thức (bài tự kiểm bắt buộc của bước 1.2)
-mvn -q test -Dtest=PacketUtilsTest
-#    Ky vong:  Tests run: 7, Failures: 0
+# 2. Chạy TOÀN BỘ kiểm thử JUnit (hợp đồng, luật server, phòng học, jitter buffer)
+mvn -o -q verify
+#    Ky vong:  Tests run: 59, Failures: 0
 
 # 3. Bài kiểm thử T0 đầy đủ — tự dựng server + 1 giáo viên + 3 học sinh
 mvn -q exec:java -Dexec.mainClass=com.pbl4.tools.T0Demo
@@ -63,6 +66,8 @@ mvn exec:java
 nên chạy được trên máy không cài Maven. Bản `original-*.jar` là jar mỏng chỉ có code của mình —
 **không dùng bản đó**, server sẽ báo `No suitable driver found for jdbc:sqlite`.
 
+Jar dùng **một điểm vào chung** `com.pbl4.Launcher`:
+
 ```bash
 mvn -q package
 
@@ -70,9 +75,16 @@ mvn -q package
 java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar
 
 # Cua so 2: giao dien client. Mac dinh noi toi 127.0.0.1:9000
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI
+java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar client
 
 # Client o may khac: truyen IP cua may chay server
+java -jar pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar client 192.168.1.10 9000
+```
+
+Cách chạy cũ (trỏ thẳng class) vẫn dùng được:
+
+```bash
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI
 java -cp pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI 192.168.1.10 9000
 ```
 
@@ -82,8 +94,11 @@ java -cp pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI 
 ### Client giả lập để test từng chức năng
 
 ```bash
-java -cp target/classes com.pbl4.tools.TestClient <host> <port> <lenh> [tham so]
+java -cp target/classes com.pbl4.tools.TestClient <host> <port> [--as user:pass:ROLE] <lenh> [tham so]
 ```
+
+`--as` tự đăng ký + đăng nhập trước khi chạy lệnh, ví dụ
+`TestClient 127.0.0.1 9000 --as lan:123456:TEACHER screen-send new 30 15`.
 
 | Lệnh | Việc |
 |---|---|
@@ -94,8 +109,8 @@ java -cp target/classes com.pbl4.tools.TestClient <host> <port> <lenh> [tham so]
 | `join <roomId>` / `leave <roomId>` | Vào / rời lớp |
 | `chat <roomId> <nội dung>` | Gửi chat |
 | `screen-start` / `screen-stop <roomId>` | Xin bắt đầu / dừng chia sẻ màn hình |
-| `screen-send <roomId> <giây>` | Giả máy giáo viên: gửi frame JPEG 62 KB ở 10 FPS |
-| `screen-recv <roomId> <giây> [ms]` | Nhận frame. **`ms > 0` = giả lập client MẠNG CHẬM** |
+| `screen-send <roomId\|new> <giây> [giâyChờ]` | Giả máy giáo viên: `new` = tự tạo lớp rồi gửi frame JPEG 62 KB ở 10 FPS |
+| `screen-recv <roomId> <giây> [ms]` | Nhận frame. **`ms > 0` = giả lập client MẠNG CHẬM**; in độ trễ frame `p50/p95/max` |
 | `audio-send <roomId> <giây>` | Giả mic: gửi gói 648 byte ở 50 gói/giây |
 | `audio-recv <roomId> <giây>` | Nhận thoại, **đo tỉ lệ mất gói và số gói sai thứ tự** |
 
@@ -104,12 +119,12 @@ Ví dụ chứng minh bước 3.3 (một client chậm không làm đứng cả 
 ```bash
 # Cua so 1: server
 java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar
-# Cua so 2: giao vien tao lop, cho 15 giay, roi chia se 30 giay -> chep ROOM_ID in ra
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-send new 30 15
+# Cua so 2: giao vien TU TAO lop, cho 15 giay, roi chia se 30 giay -> chep ROOM_ID in ra
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 --as lan:123456:TEACHER screen-send new 30 15
 # Cua so 3: hoc sinh binh thuong (trong 15 giay do)
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv <ROOM_ID> 40
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 --as hs1:123456:STUDENT screen-recv <ROOM_ID> 40
 # Cua so 4: hoc sinh MANG CHAM
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv <ROOM_ID> 40 200
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 --as hs2:123456:STUDENT screen-recv <ROOM_ID> 40 200
 ```
 
 Kỳ vọng: học sinh bình thường nhận frame đều kèm thống kê độ trễ `p50/p95`; học sinh mạng chậm **không** làm bạn kia
@@ -119,22 +134,32 @@ giật, và server in ra số frame đã bỏ của bạn đó. (Lưu ý: độ 
 
 ## 3. Trạng thái hiện tại — cái gì xong, cái gì chưa
 
-### Đã xong (TV1)
+> **Kiểm thử tự động: 59 test JUnit, 0 lỗi** (`mvn -o -q verify`) + `T0Demo` 20/20 +
+> `TV2Chang2Test` 17/17. Chi tiết từng nhóm test xem `docs/KIEN_TRUC.md` mục 7.
+
+### Cấu trúc sau refactor (nhánh `refactor/chuan-hoa-cau-truc`)
 
 | File | Nội dung |
 |---|---|
 | `common/Protocol.java` | Cổng 9000/9001, `MAX_PAYLOAD`, layout gói UDP, hằng số pool |
 | `common/PacketType.java` | Mã byte của 19 loại gói, đúng bảng 1.5.3 |
-| `common/Packet.java` | Đối tượng gói bất biến |
-| `common/PacketUtils.java` | `encode` / `sendPacket` / `readPacket` + `buildPayload` |
-| `common/RoomInfo.java` | Thông tin lớp cho `ROOM_LIST_RES` |
-| `common/Sha256.java` | Băm mật khẩu phía client |
+| `common/Packet.java`, `PacketUtils.java` | Gói bất biến; `encode` / `sendPacket` / `readPacket` |
+| `common/msg/Messages.java` | **Một chỗ duy nhất** encode/decode payload — 11 record + golden test |
+| `common/RoomInfo.java`, `Sha256.java` | Thông tin lớp; băm mật khẩu phía client |
 | `server/ServerMain.java` | ServerSocket 9000, thread pool 50, vòng accept, thống kê định kỳ |
-| `server/ClientHandler.java` | Đọc gói, định tuyến 19 loại, **một luồng ghi duy nhất**, 2 hàng đợi |
-| `server/Room.java` | Thành viên + `ReentrantLock` riêng + broadcast sao-chép-rồi-nhả-khoá |
-| `server/RoomManager.java` | `ConcurrentHashMap` các lớp, dọn lớp rỗng |
-| `server/AudioRelayServer.java` | Relay UDP 9001, **trừ người gửi**, thống kê mỗi 100 gói |
+| `server/ServerConfig.java` | Cấu hình server; **bind cổng trong constructor** ⇒ test dùng cổng ngẫu nhiên |
+| `server/ClientHandler.java` | Chỉ còn transport + phiên (313 dòng); định tuyến qua `ServerContext` |
+| `server/handler/AuthHandler.java` | Đăng nhập/đăng ký + kiểm tra đầu vào (B7) |
+| `server/handler/RoomHandler.java` | Tạo/vào/rời lớp từ CSDL (B1), chống phòng ma (B2), chat (B5) |
+| `server/handler/ScreenHandler.java` | Chỉ chủ lớp được chia sẻ (B3), relay frame |
+| `server/handler/AudioHandler.java` | Bật/tắt mic, yêu cầu đăng nhập (B7) |
+| `server/Room.java` | Thành viên + `ReentrantLock` riêng + cờ `closed` (B2) + broadcast sao-chép-rồi-nhả-khoá |
+| `server/RoomManager.java` | `ConcurrentHashMap`, `openIfAbsent`, dọn lớp rỗng |
+| `server/AudioRelayServer.java` | Relay UDP 9001, **trừ người gửi**, **chỉ nhận từ thành viên bật mic** (B6) |
+| `server/db/DatabaseManager.java` | **Interface**; `SqliteDatabaseManager` là bản cài SQLite (test dùng `:memory:`) |
+| `client/media/AudioSession.java` | MỘT đối tượng sở hữu socket UDP + mic + loa của một lần vào lớp |
 | `tools/` | 4 công cụ kiểm thử (xem mục 2) |
+| `src/test/` | 59 test JUnit (xem mục 2) |
 
 ### Đã nhận từ TV2 và TV3 (cập nhật 27/10/2026)
 
@@ -207,58 +232,12 @@ Xem `common/PacketType.java` — đã ghi kèm định dạng payload từng lo�
 
 ---
 
-## 5. Bốn quyết định thiết kế quan trọng (dùng để trả lời hội đồng)
+## 5. Bốn quyết định thiết kế quan trọng
 
-### 5.1 Một luồng ghi duy nhất cho mỗi socket
-
-Ghi một gói là **ba thao tác liên tiếp** (4 byte + 1 byte + payload). Nếu hai luồng cùng gọi
-`write()` trên một socket, gói của người này sẽ chèn vào giữa gói của người kia và bên nhận
-đọc ra rác.
-
-**Cách làm:** mọi gói được **đóng gói xong** thành `byte[]` (`PacketUtils.encode`) rồi đẩy vào
-hàng đợi. Chỉ luồng `srv-writer-N` được chạm vào socket.
-
-### 5.2 Hai hàng đợi riêng: điều khiển và frame
-
-| Hàng đợi | Sức chứa | Khi đầy |
-|---|---|---|
-| `controlQueue` (đăng nhập, vào lớp, chat, lỗi…) | không giới hạn | **không bao giờ bỏ** — luôn được ưu tiên |
-| `frameQueue` (frame màn hình) | **2** | **bỏ frame CŨ NHẤT** (drop-oldest) |
-
-Vì sao sức chứa 2 mà không phải 100: sức chứa 100 sẽ tích tụ frame cũ và đẩy độ trễ lên hàng giây.
-Với video trực tiếp, frame mới phản ánh hiện tại — giữ frame cũ là đang chiếu lại quá khứ.
-
-Vì sao tách hai hàng đợi: một học sinh mạng chậm chỉ được phép **mất frame màn hình**,
-không bao giờ được mất thông báo vào/ra lớp hay lời nhắn chat.
-
-### 5.3 Luật vàng: sao chép trong khoá — nhả khoá rồi mới gửi
-
-```java
-List<ClientHandler> targets;
-lock.lock();
-try {
-    targets = new ArrayList<>(members);   // CHỈ sao chép, không I/O ở đây
-} finally {
-    lock.unlock();                        // nhả khoá TRƯỚC khi chạm vào mạng
-}
-for (ClientHandler c : targets) {         // giờ mới gửi
-    c.offerFrame(jpeg);
-}
-```
-
-`write()` lên socket có thể bị chặn rất lâu khi client mạng chậm hoặc đệm gửi đầy. Nếu vẫn giữ
-khoá trong lúc đó, mọi luồng khác cần khoá của lớp này sẽ đứng chờ — **một học sinh mạng yếu làm
-cả lớp đứng, dù CPU hoàn toàn rảnh**.
-
-Số đo thực tế từ `T0Demo`: vùng găng chỉ kéo dài **~15 micro giây**.
-
-Mỗi lớp có khoá riêng ⇒ khoá lớp A không chặn lớp B.
-
-### 5.4 Mỗi lớp có khoá riêng, không dùng khoá toàn cục
-
-Nếu dùng một khoá chung cho cả server thì mọi lớp phải xếp hàng chờ nhau — mất hết lợi ích của
-đa luồng. `ConcurrentHashMap` cho `RoomManager` cũng vì lý do này: tra cứu lớp không trở thành
-nút thắt.
+Bốn quyết định lớn nhất của thiết kế (một luồng ghi duy nhất, hai hàng đợi, luật
+"sao chép → nhả khoá → gửi", mỗi lớp một khoá) đã chuyển sang
+**`docs/KIEN_TRUC.md` mục 8** — cùng sơ đồ gói, bảng luồng, bảng cơ chế đồng bộ và các quy tắc
+bảo mật phía server. Đó là nguồn cho Chương 2 của báo cáo.
 
 ---
 

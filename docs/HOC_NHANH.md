@@ -18,28 +18,27 @@ Chỉ **một** thư viện ngoài: `org.xerial:sqlite-jdbc`.
 
 ---
 
-## 2. Trong repo có gì — 33 file Java
+## 2. Trong repo có gì — 51 file Java (41 main + 10 test)
 
 | Gói | Số file | Nội dung |
 |---|---|---|
-| `common/` | 6 | `Protocol` · `PacketType` · `Packet` · `PacketUtils` · `RoomInfo` · `Sha256` |
-| `server/` | 5 | `ServerMain` · `ClientHandler` · `Room` · `RoomManager` · `AudioRelayServer` |
-| `server/db/` | 2 | `DatabaseManager` (**lớp SQLite thật**) · `InMemoryDatabaseManager` (`extends`) |
-| `client/media/` | 7 | TV2: `AudioConfig` · `AudioRecorder` · `AudioPlayer` · `JitterBuffer` · `ScreenCapturer` · `ScreenReceiver` · `MediaStats` |
+| `common/` | 7 | `Protocol` · `PacketType` · `Packet` · `PacketUtils` · `RoomInfo` · `Sha256` · `msg/Messages` |
+| `server/` | 7 | `ServerMain` · `ServerConfig` · `ServerContext` · `ClientHandler` · `Room` · `RoomManager` · `AudioRelayServer` |
+| `server/handler/` | 4 | TV1: `AuthHandler` · `RoomHandler` · `ScreenHandler` · `AudioHandler` |
+| `server/db/` | 2 | `DatabaseManager` (**interface**) · `SqliteDatabaseManager` (bản cài SQLite) |
+| `client/media/` | 8 | TV2: `AudioSession` · `AudioConfig` · `AudioRecorder` · `AudioPlayer` · `JitterBuffer` · `ScreenCapturer` · `ScreenReceiver` · `MediaStats` |
 | `client/net/` | 2 | TV3: `ServerConnection` · `ClientListener` |
 | `client/ui/` | 4 | TV3: `LoginUI` · `HomeUI` · `ClassroomUI` · `ScreenPanel` |
-| `tools/` | 7 | TV1: 4 công cụ kiểm thử · TV2: `TV2Chang1Test`, `TV2Chang2Test`, `TV2Chang3Test` |
+| `tools/` | 6 | TV1: 4 công cụ kiểm thử · TV2: `TV2Chang1Test`, `TV2Chang2Test`, `TV2Chang3Test` |
+| `src/test/` | 10 | 59 test JUnit: hợp đồng (`PacketUtilsTest`, `MessagesTest`), luật server (`ServerRulesTest`), phòng học (`RoomTest`, `RoomManagerTest`), CSDL, media, tích hợp (`T0ScenarioTest`, `LoadSmokeTest`) |
 
 ---
 
 ## 3. Hai điểm lệch cần biết (dễ bị hỏi)
 
-**a) `DatabaseManager` không còn là interface.** Giờ là **lớp cụ thể** bọc SQLite:
-`new DatabaseManager("pbl4.db")` trong `ServerMain.main()`. `InMemoryDatabaseManager` đổi thành
-`extends DatabaseManager` (`super(":memory:")`). ⇒ Không còn "đổi một dòng" như thiết kế ban đầu.
-
-**b) Không có file `SqliteDatabaseManager`** như bảng 1.5.5 mô tả — chức năng nằm ngay trong
-`DatabaseManager`. Nói đúng khi bảo vệ: *"chức năng đã có, chỉ khác tên và chỗ đặt so với bảng."*
+**a) ĐÃ SỬA — `DatabaseManager` quay về interface** đúng thiết kế bảng 1.5.5:
+`SqliteDatabaseManager` là bản cài; `InMemoryDatabaseManager` đã xoá; test dùng SQLite `:memory:`.
+Nói đúng khi bảo vệ: *"đúng bảng 1.5.5, đổi bản cài không phải đụng code khác."*
 
 Ngoài ra: TV2 có **nhật ký hiểu + 3 lỗi thật** trong `docs/`; TV3 **chưa có** nhật ký.
 

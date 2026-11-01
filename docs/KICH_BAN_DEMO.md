@@ -25,13 +25,15 @@ Chờ tới khi thấy `===== SERVER DANG CHAY =====` và `Cho ket noi...` rồi
 
 ```bash
 # CUA SO 2 — client giao dien (mo 2 lan: 1 giao vien, 1 hoc sinh)
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI
+java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar client
 ```
+
+Cách chạy cũ vẫn dùng được: `java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI`.
 
 Nếu client ở **máy khác**: chép jar sang, rồi thêm IP máy server:
 
 ```bash
-java -cp pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI 192.168.1.10 9000
+java -jar pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar client 192.168.1.10 9000
 ```
 
 ## 1. Kịch bản 5 phút
@@ -45,8 +47,8 @@ java -cp pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI 
 | 5 | Client 1 (giáo viên): bấm **Chia sẻ màn hình** | "Client tự chụp bằng `Robot`, nén JPEG 10 hình/giây, gửi TCP. Server **chỉ chuyển tiếp**, không chụp không nén." |
 | 6 | Chỉ cửa sổ học sinh: ảnh đang đổ | "Học sinh nhận frame và vẽ lên giao diện." |
 | 7 | Client 1: bấm **Bật Mic**; client 2: nói/nghe | "Thoại đi UDP 9001, gói 648 byte = 20 ms tiếng. Mỗi bên có luồng nhận riêng và jitter buffer." |
-| 8 | Gõ vài dòng **chat** hai chiều | "Chat chữ đi chung kênh điều khiển TCP." |
-| 9 | Bấm **Rời phòng** ở học sinh | "Rời lớp thì server cập nhật danh sách; lớp rỗng thì tự xoá khỏi bộ nhớ." |
+| 8 | Gõ vài dòng **chat** hai chiều | "Chat chữ đi chung kênh điều khiển TCP. **Tên người gửi do server gắn vào trước khi phát**, client không giả mạo được." |
+| 9 | Bấm **Rời phòng** ở học sinh | "Rời lớp thì về **trang chủ, giữ nguyên kết nối** — không phải đăng nhập lại; server cập nhật danh sách; lớp rỗng thì tự xoá khỏi bộ nhớ." |
 
 **Lưu ý khi demo trên MỘT máy:** ảnh chia sẻ là ảnh của chính màn hình đang mở, nên trông
 lồng nhau — đó là điều bình thường, không phải lỗi. Âm thanh nên đeo tai nghe hoặc giảm
@@ -76,15 +78,15 @@ Kỳ vọng: `KET QUA: 20 DAT / 20 TONG`. Bài này tự dựng server + 1 giáo
 ## 3. Nhóm đang ở đâu (nói thẳng, không né)
 
 **Đã xong:**
-- Server đa luồng + giao thức 18 loại gói, tạo/vào/rời lớp, relay thoại (TV1).
-- Client media: mic, loa, jitter buffer, chụp + nén màn hình (TV2).
-- CSDL SQLite + giao diện đăng nhập, trang chủ, phòng học (TV3).
-- Đã gộp đủ code 3 người: build sạch, **73/73 kiểm thử ĐẠT** (T0 20/20, TV2 chặng 1–3
-  16/16 · 17/17 · 20/20).
+- Server đa luồng + giao thức 19 loại gói, tạo/vào/rời lớp, relay thoại, 4 handler nghiệp vụ (TV1).
+- Client media: mic, loa, jitter buffer, chụp + nén màn hình, `AudioSession` gom socket+mic+loa (TV2).
+- CSDL SQLite (interface `DatabaseManager` + bản SQLite thật) + giao diện đăng nhập, trang chủ, phòng học (TV3).
+- Đã hoàn tất refactor "chuẩn hoá cấu trúc" (Bước 0–7 của `KE_HOACH_REFACTOR.md`): sửa 8 lỗi B0–B8,
+  **59 test JUnit 0 lỗi**, `T0Demo` 20/20, `TV2Chang2Test` 17/17.
 
 **Chưa xong:**
 - 4.2 Thí nghiệm so sánh "giữ khoá khi gửi" vs "nhả khoá trước khi gửi" (bảng số liệu).
-- 4.3 Chương báo cáo. 4.4 Slide + kịch bản demo (file này là bước đầu của 4.4).
+- 4.3 Chương báo cáo. 4.4 Slide. Smoke GUI 14 bước trong `KE_HOACH_REFACTOR.md` 9.2 (cần người bấm thật).
 - Chưa thử thoại/màn hình giữa **nhiều máy thật** — mới chạy trên một máy.
 
 ## 4. Phương án dự phòng
@@ -95,5 +97,7 @@ Kỳ vọng: `KET QUA: 20 DAT / 20 TONG`. Bài này tự dựng server + 1 giáo
 | `Address already in use` | Server cũ còn chạy. Đóng cửa sổ server cũ rồi mở lại. |
 | Client không kết nối được | Server chưa in `Cho ket noi...`, hoặc sai IP/cổng, hoặc tường lửa chặn TCP 9000. |
 | Vào lớp được nhưng **không nghe tiếng** | UDP 9001 bị chặn (2 máy), hoặc chưa bấm **Bật Mic** ở phía nói. |
+| Vào lớp bị báo `Lop dang dong, vui long thu lai` | Lớp vừa có người cuối rời (đang được dọn). **Bấm Tham gia lần nữa** là vào được. |
+| Đăng ký bị báo tên/mat khau khong hop le | Tên phải 2–32 ký tự: chữ, số, `_` hoặc `.`; mật khẩu đã băm SHA-256 ở client — không gõ hash tay. |
 | Không có mạng / máy khác | Demo 1 máy 2 client vẫn chứng minh được toàn bộ luồng xử lý. |
 | Sập giữa buổi | Chạy `T0Demo` và nói: "phần này nhóm đã kiểm thử tự động 20/20". |
