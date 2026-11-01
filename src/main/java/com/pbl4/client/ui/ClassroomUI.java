@@ -61,6 +61,7 @@ public class ClassroomUI {
     private boolean micOn;
     private boolean sharing;
     private boolean inRoom = true;
+    private boolean returningHome;
 
     public ClassroomUI(ServerConnection connection, String username, String role,
                        int roomId, String roomName, AudioSession audio, String serverIp) {
@@ -163,7 +164,9 @@ public class ClassroomUI {
                 if (ClassroomUI.this.audio != null) {
                     ClassroomUI.this.audio.close();
                 }
-                ClassroomUI.this.connection.close();
+                if (!ClassroomUI.this.returningHome) {
+                    ClassroomUI.this.connection.close();
+                }
             }
         });
     }
@@ -298,10 +301,16 @@ public class ClassroomUI {
         }
     }
 
+    /** Nút "Rời phòng": về trang chủ nhưng GIỮ kết nối — không phải đăng nhập lại (B8). */
     private void leaveRoom() {
         sendLeaveRequest();
         inRoom = false;
-        frame.dispose();
+        returningHome = true;
+        if (audio != null) {
+            audio.close();   // đóng AudioSession cũ TRƯỚC khi HomeUI mở cái mới (close lặp an toàn)
+        }
+        frame.dispose();     // windowClosed chạy, KHÔNG đóng kết nối
+        new HomeUI(connection, username, role, serverIp);
     }
 
     private void sendLeaveRequest() {
