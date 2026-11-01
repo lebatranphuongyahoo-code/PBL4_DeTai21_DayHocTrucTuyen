@@ -9,8 +9,8 @@ import com.pbl4.client.media.ScreenReceiver;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
-import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
+import com.pbl4.common.msg.Messages;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -31,7 +31,6 @@ import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -252,7 +251,7 @@ public class ClassroomUI {
             micOn = false;
             micButton.setText("Bật Mic");
             try {
-                byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+                byte[] payload = new Messages.RoomIdOnly(roomId).encode();
                 connection.send(PacketType.AUDIO_OFF, payload);
                 showStatus("Đã tắt mic.", false);
             } catch (IOException e) {
@@ -263,11 +262,7 @@ public class ClassroomUI {
 
         try {
             // Loa đã chạy từ lúc vào lớp; cổng UDP chính là cổng đã đăng ký trong JOIN_ROOM_REQ.
-            int udpPort = audioSocket != null ? audioSocket.getLocalPort() : -1;
-            byte[] payload = PacketUtils.buildPayload(output -> {
-                output.writeInt(roomId);
-                output.writeInt(udpPort);
-            });
+            byte[] payload = new Messages.RoomIdOnly(roomId).encode();
             connection.send(PacketType.AUDIO_ON, payload);
             audioRecorder.start(serverIp, Protocol.UDP_PORT, roomId);
             micOn = !micOn;
@@ -276,7 +271,7 @@ public class ClassroomUI {
         } catch (Exception e) {
             audioRecorder.stop();
             try {
-                byte[] offPayload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+                byte[] offPayload = new Messages.RoomIdOnly(roomId).encode();
                 connection.send(PacketType.AUDIO_OFF, offPayload);
             } catch (IOException offException) {
                 e.addSuppressed(offException);
@@ -315,7 +310,7 @@ public class ClassroomUI {
         }
 
         try {
-            byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+            byte[] payload = new Messages.RoomIdOnly(roomId).encode();
             connection.send(PacketType.SCREEN_START, payload);
             screenSendFailed = false;
             screenCapturer = capturer;
@@ -327,7 +322,7 @@ public class ClassroomUI {
             capturer.stop();
             screenCapturer = null;
             try {
-                byte[] stopPayload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+                byte[] stopPayload = new Messages.RoomIdOnly(roomId).encode();
                 connection.send(PacketType.SCREEN_STOP, stopPayload);
             } catch (IOException stopException) {
                 e.addSuppressed(stopException);
@@ -363,7 +358,7 @@ public class ClassroomUI {
 
     private void sendRoomCommand(String status) {
         try {
-            byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+            byte[] payload = new Messages.RoomIdOnly(roomId).encode();
             connection.send(PacketType.SCREEN_STOP, payload);
             showStatus(status, false);
         } catch (IOException e) {
@@ -377,10 +372,7 @@ public class ClassroomUI {
             return;
         }
         try {
-            byte[] payload = PacketUtils.buildPayload(output -> {
-                output.writeInt(roomId);
-                output.writeUTF(text);
-            });
+            byte[] payload = new Messages.ChatText(roomId, text).encode();
             connection.send(PacketType.CHAT_TEXT, payload);
             chatInput.setText("");
         } catch (IOException e) {
@@ -404,8 +396,7 @@ public class ClassroomUI {
                 audioRecorder.stop();
                 audioPlayer.stop();
                 micOn = false;
-                byte[] audioOffPayload =
-                        PacketUtils.buildPayload(output -> output.writeInt(roomId));
+                byte[] audioOffPayload = new Messages.RoomIdOnly(roomId).encode();
                 connection.send(PacketType.AUDIO_OFF, audioOffPayload);
             }
             if (sharing) {
@@ -413,7 +404,7 @@ public class ClassroomUI {
                 sharing = false;
                 sendRoomCommand("Đang rời phòng...");
             }
-            byte[] payload = PacketUtils.buildPayload(output -> output.writeInt(roomId));
+            byte[] payload = new Messages.RoomIdOnly(roomId).encode();
             connection.send(PacketType.LEAVE_ROOM_REQ, payload);
         } catch (IOException e) {
             showStatus("Không gửi được yêu cầu rời phòng: " + e.getMessage(), true);
@@ -424,7 +415,11 @@ public class ClassroomUI {
         try {
             switch (packet.getType()) {
                 case PacketType.USER_LIST -> {
-                    List<String> members = readMembers(packet);
+                    Messages.UserList userList = Messages.UserList.decode(packet.getPayload());
+                    List<String> members = new ArrayList<>(userList.members().size());
+                    for (Messages.Member m : userList.members()) {
+                        members.add(m.username() + " — " + m.role());
+                    }
                     SwingUtilities.invokeLater(() -> displayMembers(members));
                 }
                 case PacketType.SCREEN_FRAME -> {
@@ -434,12 +429,12 @@ public class ClassroomUI {
                     }
                 }
                 case PacketType.SCREEN_START -> {
-                    String teacher = readTeacher(packet);
+                    String teacher = Messages.ScreenNotice.decode(packet.getPayload()).text();
                     SwingUtilities.invokeLater(() ->
                             showStatus(teacher + " đang chia sẻ màn hình.", false));
                 }
                 case PacketType.SCREEN_STOP -> {
-                    String message = readScreenStopMessage(packet);
+                    String message = Messages.ScreenNotice.decode(packet.getPayload()).text();
                     SwingUtilities.invokeLater(() -> {
                         stopScreenCapturer();
                         sharing = false;
@@ -449,13 +444,13 @@ public class ClassroomUI {
                     });
                 }
                 case PacketType.CHAT_TEXT -> {
-                    String message = readChat(packet);
-                    if (message != null) {
-                        SwingUtilities.invokeLater(() -> appendChat(message));
+                    Messages.ChatText chat = Messages.ChatText.decode(packet.getPayload());
+                    if (chat.roomId() == roomId) {
+                        SwingUtilities.invokeLater(() -> appendChat(chat.text()));
                     }
                 }
                 case PacketType.ERROR -> {
-                    String message = readError(packet);
+                    String message = Messages.ErrorMessage.decode(packet.getPayload()).message();
                     SwingUtilities.invokeLater(() -> {
                         if (sharing && message.toLowerCase(java.util.Locale.ROOT)
                                 .contains("chi giao vien")) {
@@ -477,48 +472,6 @@ public class ClassroomUI {
 
     void acceptPacket(Packet packet) {
         onPacket(packet);
-    }
-
-    private static List<String> readMembers(Packet packet) throws IOException {
-        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-            int count = input.readInt();
-            if (count < 0 || count > 100_000) {
-                throw new IOException("Số lượng thành viên không hợp lệ: " + count);
-            }
-            List<String> members = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) {
-                members.add(input.readUTF() + " — " + input.readUTF());
-            }
-            return members;
-        }
-    }
-
-    private static String readTeacher(Packet packet) throws IOException {
-        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-            input.readInt();
-            return input.readUTF();
-        }
-    }
-
-    private static String readScreenStopMessage(Packet packet) throws IOException {
-        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-            input.readInt();
-            return input.readUTF();
-        }
-    }
-
-    private String readChat(Packet packet) throws IOException {
-        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-            int messageRoomId = input.readInt();
-            String text = input.readUTF();
-            return messageRoomId == roomId ? text : null;
-        }
-    }
-
-    private static String readError(Packet packet) throws IOException {
-        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-            return input.readUTF();
-        }
     }
 
     private void displayMembers(List<String> members) {

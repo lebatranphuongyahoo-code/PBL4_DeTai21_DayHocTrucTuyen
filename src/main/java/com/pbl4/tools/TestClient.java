@@ -4,7 +4,9 @@ import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
 import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
+import com.pbl4.common.RoomInfo;
 import com.pbl4.common.Sha256;
+import com.pbl4.common.msg.Messages;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -191,36 +193,31 @@ public class TestClient {
             System.out.println("[test] khong nhan duoc ROOM_LIST_RES");
             return;
         }
-        DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-        int n = r.readInt();
-        System.out.println("[test] co " + n + " lop:");
-        for (int i = 0; i < n; i++) {
+        List<RoomInfo> rooms = Messages.RoomList.decode(res.getPayload()).rooms();
+        System.out.println("[test] co " + rooms.size() + " lop:");
+        for (RoomInfo r : rooms) {
             System.out.printf("   ma=%d  ten='%s'  GV=%s  soNguoi=%d%n",
-                    r.readInt(), r.readUTF(), r.readUTF(), r.readInt());
+                    r.roomId(), r.roomName(), r.teacherUsername(), r.memberCount());
         }
     }
 
     private static void cmdCreate(Conn conn, String[] a) throws Exception {
         conn.send(PacketType.CREATE_ROOM_REQ,
-                PacketUtils.buildPayload(o -> o.writeUTF(a[0])));
+                new Messages.CreateRoomRequest(a[0]).encode());
         Packet res = conn.await(PacketType.CREATE_ROOM_RES, 3000);
         if (res == null) {
             System.out.println("[test] khong nhan duoc CREATE_ROOM_RES");
             return;
         }
-        DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-        int ok = r.readByte();
-        String msg = r.readUTF();
-        int roomId = r.readInt();
-        System.out.println("[test] tao lop: ok=" + ok + " | " + msg + " | roomId=" + roomId);
+        Messages.CreateRoomResponse cr = Messages.CreateRoomResponse.decode(res.getPayload());
+        System.out.println("[test] tao lop: ok=" + (cr.ok() ? 1 : 0)
+                + " | " + cr.message() + " | roomId=" + cr.roomId());
     }
 
     private static void cmdJoin(Conn conn, String[] a, int udpPort) throws Exception {
         int roomId = Integer.parseInt(a[0]);
-        conn.send(PacketType.JOIN_ROOM_REQ, PacketUtils.buildPayload(o -> {
-            o.writeInt(roomId);
-            o.writeInt(udpPort);
-        }));
+        conn.send(PacketType.JOIN_ROOM_REQ,
+                new Messages.JoinRoomRequest(roomId, udpPort).encode());
         Packet res = conn.await(PacketType.JOIN_ROOM_RES, 3000);
         System.out.println("[test] vao lop: " + describe(res));
         Packet userList = conn.await(PacketType.USER_LIST, 2000);
@@ -232,7 +229,7 @@ public class TestClient {
     private static void cmdLeave(Conn conn, String[] a) throws Exception {
         int roomId = Integer.parseInt(a[0]);
         conn.send(PacketType.LEAVE_ROOM_REQ,
-                PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                new Messages.RoomIdOnly(roomId).encode());
         Packet userList = conn.await(PacketType.USER_LIST, 2000);
         if (userList != null) {
             System.out.println("[test] sau khi roi lop:");
@@ -243,33 +240,30 @@ public class TestClient {
     private static void cmdChat(Conn conn, String[] a) throws Exception {
         int roomId = Integer.parseInt(a[0]);
         String text = String.join(" ", Arrays.copyOfRange(a, 1, a.length));
-        conn.send(PacketType.CHAT_TEXT, PacketUtils.buildPayload(o -> {
-            o.writeInt(roomId);
-            o.writeUTF(text);
-        }));
+        conn.send(PacketType.CHAT_TEXT, new Messages.ChatText(roomId, text).encode());
         Packet echoed = conn.await(PacketType.CHAT_TEXT, 2000);
         if (echoed != null) {
-            DataInputStream r = PacketUtils.payloadReader(echoed.getPayload());
-            System.out.println("[test] chat: lop=" + r.readInt() + " | " + r.readUTF());
+            Messages.ChatText c = Messages.ChatText.decode(echoed.getPayload());
+            System.out.println("[test] chat: lop=" + c.roomId() + " | " + c.text());
         }
     }
 
     private static void cmdScreenStart(Conn conn, String[] a) throws Exception {
         int roomId = Integer.parseInt(a[0]);
         conn.send(PacketType.SCREEN_START,
-                PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                new Messages.RoomIdOnly(roomId).encode());
         Packet p = conn.awaitEither(PacketType.SCREEN_START, PacketType.ERROR, 2000);
         System.out.println("[test] xin chia se man hinh -> "
                 + (p == null ? "khong phan hoi" : p.typeName()));
         if (p != null && p.getType() == PacketType.ERROR) {
-            System.out.println("        " + PacketUtils.payloadReader(p.getPayload()).readUTF());
+            System.out.println("        " + Messages.ErrorMessage.decode(p.getPayload()).message());
         }
     }
 
     private static void cmdScreenStop(Conn conn, String[] a) throws Exception {
         int roomId = Integer.parseInt(a[0]);
         conn.send(PacketType.SCREEN_STOP,
-                PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                new Messages.RoomIdOnly(roomId).encode());
         Thread.sleep(300);
         System.out.println("[test] da gui SCREEN_STOP");
     }
@@ -301,7 +295,7 @@ public class TestClient {
 
         final int targetRoomId = roomId;
         conn.send(PacketType.SCREEN_START,
-                PacketUtils.buildPayload(o -> o.writeInt(targetRoomId)));
+                new Messages.RoomIdOnly(targetRoomId).encode());
         Packet p = conn.awaitEither(PacketType.SCREEN_START, PacketType.ERROR, 2000);
         if (p == null || p.getType() == PacketType.ERROR) {
             System.out.println("[test] khong duoc phep chia se man hinh!");
@@ -400,7 +394,7 @@ public class TestClient {
         int myPort = conn.audioSocket.getLocalPort();
 
         ensureJoinRoom(conn, roomId, myPort);
-        conn.send(PacketType.AUDIO_ON, PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+        conn.send(PacketType.AUDIO_ON, new Messages.RoomIdOnly(roomId).encode());
         System.out.println("[test] bao cong UDP " + myPort + " va bat mic, noi trong " + seconds + " giay");
 
         byte[] packet = new byte[Protocol.UDP_PACKET_BYTES];
@@ -425,7 +419,7 @@ public class TestClient {
         System.out.printf("[test] da gui %d goi thoai | %.1fs | %.2f MB%n",
                 total, ms / 1000.0, total * (double) packet.length / 1e6);
 
-        conn.send(PacketType.AUDIO_OFF, PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+        conn.send(PacketType.AUDIO_OFF, new Messages.RoomIdOnly(roomId).encode());
     }
 
     /** Nhận thoại và đo tỉ lệ mất gói + số gói đến sai thứ tự nhờ trường seqNo. */
@@ -541,60 +535,42 @@ public class TestClient {
         /** REGISTER (bỏ qua trùng tên) rồi LOGIN. Ném IllegalStateException nếu đăng nhập thất bại. */
         public void registerAndLogin(String user, String password, String role) throws Exception {
             String hash = Sha256.hex(password);
-            send(PacketType.REGISTER_REQ, PacketUtils.buildPayload(o -> {
-                o.writeUTF(user);
-                o.writeUTF(hash);
-                o.writeUTF(role);
-            }));
+            send(PacketType.REGISTER_REQ, new Messages.RegisterRequest(user, hash, role).encode());
             await(PacketType.REGISTER_RES, 3000);
 
-            send(PacketType.LOGIN_REQ, PacketUtils.buildPayload(o -> {
-                o.writeUTF(user);
-                o.writeUTF(hash);
-            }));
+            send(PacketType.LOGIN_REQ, new Messages.LoginRequest(user, hash).encode());
             Packet login = await(PacketType.LOGIN_RES, 3000);
             if (login == null) {
                 throw new IllegalStateException("khong nhan duoc LOGIN_RES");
             }
-            DataInputStream r = PacketUtils.payloadReader(login.getPayload());
-            int ok = r.readByte();
-            String msg = r.readUTF();
-            if (ok == 0) {
-                throw new IllegalStateException(msg);
+            Messages.LoginResponse res = Messages.LoginResponse.decode(login.getPayload());
+            if (!res.ok()) {
+                throw new IllegalStateException(res.message());
             }
         }
 
         /** CREATE_ROOM_REQ, trả roomId; ném IllegalStateException nếu ok=0 hoặc hết giờ. */
         public int createRoom(String name) throws Exception {
-            send(PacketType.CREATE_ROOM_REQ, PacketUtils.buildPayload(o -> o.writeUTF(name)));
+            send(PacketType.CREATE_ROOM_REQ, new Messages.CreateRoomRequest(name).encode());
             Packet res = await(PacketType.CREATE_ROOM_RES, 3000);
             if (res == null) {
                 throw new IllegalStateException("khong nhan duoc CREATE_ROOM_RES");
             }
-            DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-            int ok = r.readByte();
-            String msg = r.readUTF();
-            int roomId = r.readInt();
-            if (ok == 0) {
-                throw new IllegalStateException(msg);
+            Messages.CreateRoomResponse cr = Messages.CreateRoomResponse.decode(res.getPayload());
+            if (!cr.ok()) {
+                throw new IllegalStateException(cr.message());
             }
-            return roomId;
+            return cr.roomId();
         }
 
         /** JOIN_ROOM_REQ(roomId, udpPort), chờ JOIN_ROOM_RES; trả true nếu ok=1. */
         public boolean join(int roomId, int udpPort) throws Exception {
-            send(PacketType.JOIN_ROOM_REQ, PacketUtils.buildPayload(o -> {
-                o.writeInt(roomId);
-                o.writeInt(udpPort);
-            }));
+            send(PacketType.JOIN_ROOM_REQ, new Messages.JoinRoomRequest(roomId, udpPort).encode());
             Packet res = await(PacketType.JOIN_ROOM_RES, 3000);
             if (res == null) {
                 return false;
             }
-            DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-            int ok = r.readByte();
-            r.readUTF();
-            return ok == 1;
+            return Messages.StatusResponse.decode(res.getPayload()).ok();
         }
 
         /**
@@ -735,25 +711,23 @@ public class TestClient {
             return "khong phan hoi";
         }
         try {
-            DataInputStream r = PacketUtils.payloadReader(p.getPayload());
-            int ok = r.readByte();
-            String msg = r.readUTF();
-            String extra = "";
-            if (p.getType() == PacketType.LOGIN_RES && r.available() > 0) {
-                extra = " | role=" + r.readUTF();
+            if (p.getType() == PacketType.LOGIN_RES) {
+                Messages.LoginResponse res = Messages.LoginResponse.decode(p.getPayload());
+                return p.typeName() + " ok=" + (res.ok() ? 1 : 0)
+                        + " | " + res.message() + " | role=" + res.role();
             }
-            return p.typeName() + " ok=" + ok + " | " + msg + extra;
+            Messages.StatusResponse res = Messages.StatusResponse.decode(p.getPayload());
+            return p.typeName() + " ok=" + (res.ok() ? 1 : 0) + " | " + res.message();
         } catch (IOException e) {
             return p.typeName() + " (khong doc duoc payload)";
         }
     }
 
     static void printUserList(Packet userList) throws IOException {
-        DataInputStream r = PacketUtils.payloadReader(userList.getPayload());
-        int n = r.readInt();
-        System.out.println("   USER_LIST: " + n + " nguoi");
-        for (int i = 0; i < n; i++) {
-            System.out.println("      - " + r.readUTF() + " (" + r.readUTF() + ")");
+        List<Messages.Member> members = Messages.UserList.decode(userList.getPayload()).members();
+        System.out.println("   USER_LIST: " + members.size() + " nguoi");
+        for (Messages.Member m : members) {
+            System.out.println("      - " + m.username() + " (" + m.role() + ")");
         }
     }
 

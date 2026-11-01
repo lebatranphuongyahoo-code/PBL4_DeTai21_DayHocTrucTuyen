@@ -7,9 +7,9 @@ import com.pbl4.client.media.JitterBuffer;
 import com.pbl4.client.media.MediaStats;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
-import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
 import com.pbl4.common.Sha256;
+import com.pbl4.common.msg.Messages;
 import com.pbl4.server.RoomManager;
 import com.pbl4.server.ServerConfig;
 import com.pbl4.server.ServerMain;
@@ -97,8 +97,11 @@ public class TV2Chang2Test {
         check("giao vien dang ky + dang nhap",
                 login(teacher, "gv-hoang", Protocol.ROLE_TEACHER));
         teacher.send(PacketType.CREATE_ROOM_REQ,
-                PacketUtils.buildPayload(o -> o.writeUTF("Lop TV2 test")));
-        int roomId = readRoomId(teacher.await(PacketType.CREATE_ROOM_RES, 3000));
+                new Messages.CreateRoomRequest("Lop TV2 test").encode());
+        Packet created = teacher.await(PacketType.CREATE_ROOM_RES, 3000);
+        int roomId = created == null
+                ? -1
+                : Messages.CreateRoomResponse.decode(created.getPayload()).roomId();
         check("tao lop duoc, ma lop = " + roomId, roomId > 0);
 
         check("hoc sinh dang ky + dang nhap",
@@ -232,7 +235,7 @@ public class TV2Chang2Test {
         double phaseStep = 2 * Math.PI * 440.0 / AudioConfig.SAMPLE_RATE;
 
         // Bật mic trước khi nói — đúng luồng nghiệp vụ.
-        conn.send(PacketType.AUDIO_ON, PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+        conn.send(PacketType.AUDIO_ON, new Messages.RoomIdOnly(roomId).encode());
 
         int seq = startSeq;
         for (int i = 0; i < packets; i++, seq++) {
@@ -272,54 +275,24 @@ public class TV2Chang2Test {
      */
     private static boolean login(TestClient.Conn conn, String user, String role) throws Exception {
         String hash = Sha256.hex(PASSWORD);
-        conn.send(PacketType.REGISTER_REQ, PacketUtils.buildPayload(o -> {
-            o.writeUTF(user);
-            o.writeUTF(hash);
-            o.writeUTF(role);
-        }));
-        if (!isStatusOk(conn.await(PacketType.REGISTER_RES, 2000))) {
+        conn.send(PacketType.REGISTER_REQ,
+                new Messages.RegisterRequest(user, hash, role).encode());
+        Packet regRes = conn.await(PacketType.REGISTER_RES, 2000);
+        if (regRes == null || !Messages.StatusResponse.decode(regRes.getPayload()).ok()) {
             return false;
         }
-        conn.send(PacketType.LOGIN_REQ, PacketUtils.buildPayload(o -> {
-            o.writeUTF(user);
-            o.writeUTF(hash);
-        }));
-        return isStatusOk(conn.await(PacketType.LOGIN_RES, 2000));
+        conn.send(PacketType.LOGIN_REQ,
+                new Messages.LoginRequest(user, hash).encode());
+        Packet loginRes = conn.await(PacketType.LOGIN_RES, 2000);
+        return loginRes != null && Messages.LoginResponse.decode(loginRes.getPayload()).ok();
     }
 
     /** Gửi JOIN_ROOM_REQ kèm cổng UDP, trả về {@code true} nếu server xác nhận đã vào lớp. */
     private static boolean joinRoom(TestClient.Conn conn, int roomId, int udpPort) throws Exception {
-        conn.send(PacketType.JOIN_ROOM_REQ, PacketUtils.buildPayload(o -> {
-            o.writeInt(roomId);
-            o.writeInt(udpPort);
-        }));
-        return isStatusOk(conn.await(PacketType.JOIN_ROOM_RES, 3000));
-    }
-
-    /** Đọc byte trạng thái (1 = thành công) ở đầu payload của gói kết quả. */
-    private static boolean isStatusOk(Packet res) {
-        if (res == null) {
-            return false;
-        }
-        try {
-            return PacketUtils.payloadReader(res.getPayload()).readByte() == 1;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static int readRoomId(Packet res) {
-        if (res == null) {
-            return -1;
-        }
-        try {
-            var r = PacketUtils.payloadReader(res.getPayload());
-            r.readByte();
-            r.readUTF();
-            return r.readInt();
-        } catch (Exception e) {
-            return -1;
-        }
+        conn.send(PacketType.JOIN_ROOM_REQ,
+                new Messages.JoinRoomRequest(roomId, udpPort).encode());
+        Packet res = conn.await(PacketType.JOIN_ROOM_RES, 3000);
+        return res != null && Messages.StatusResponse.decode(res.getPayload()).ok();
     }
 
     private static void section(String title) {

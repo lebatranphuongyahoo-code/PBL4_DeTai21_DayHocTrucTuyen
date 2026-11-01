@@ -3,9 +3,9 @@ package com.pbl4.client.ui;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
-import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
 import com.pbl4.common.RoomInfo;
+import com.pbl4.common.msg.Messages;
 
 import javax.swing.BorderFactory;
 import javax.swing.DefaultListModel;
@@ -23,7 +23,6 @@ import java.awt.Color;
 import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.net.DatagramSocket;
 import java.net.SocketException;
@@ -156,7 +155,7 @@ public class HomeUI {
             showStatus("Vui lòng nhập tên lớp.", true);
             return;
         }
-        byte[] payload = PacketUtils.buildPayload(output -> output.writeUTF(roomName));
+        byte[] payload = new Messages.CreateRoomRequest(roomName).encode();
         sendRequest(PacketType.CREATE_ROOM_REQ, payload, "Đang tạo lớp...");
     }
 
@@ -166,10 +165,8 @@ public class HomeUI {
             showStatus("Hãy chọn lớp cần tham gia.", true);
             return;
         }
-        byte[] payload = PacketUtils.buildPayload(output -> {
-            output.writeInt(selected.info().roomId());
-            output.writeInt(audioSocket.getLocalPort());
-        });
+        byte[] payload = new Messages.JoinRoomRequest(
+                selected.info().roomId(), audioSocket.getLocalPort()).encode();
         joiningRoom = selected;
         joinButton.setEnabled(false);
         sendRequest(PacketType.JOIN_ROOM_REQ, payload, "Đang tham gia lớp...");
@@ -200,42 +197,29 @@ public class HomeUI {
         try {
             switch (packet.getType()) {
                 case PacketType.ROOM_LIST_RES -> {
-                    List<RoomInfo> rooms = readRoomList(packet);
+                    List<RoomInfo> rooms = Messages.RoomList.decode(packet.getPayload()).rooms();
                     SwingUtilities.invokeLater(() -> displayRooms(rooms));
                 }
                 case PacketType.CREATE_ROOM_RES -> {
-                    int ok;
-                    String message;
-                    int roomId;
-                    try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-                        ok = input.readUnsignedByte();
-                        message = input.readUTF();
-                        roomId = input.readInt();
-                    }
-                    int response = ok;
-                    String responseMessage = message;
-                    int createdRoomId = roomId;
+                    Messages.CreateRoomResponse res =
+                            Messages.CreateRoomResponse.decode(packet.getPayload());
                     SwingUtilities.invokeLater(() -> {
-                        showStatus(response == 1
-                                ? responseMessage + " (mã " + createdRoomId + ")"
-                                : responseMessage, response == 0);
-                        if (response == 1) {
+                        showStatus(res.ok()
+                                ? res.message() + " (mã " + res.roomId() + ")"
+                                : res.message(), !res.ok());
+                        if (res.ok()) {
                             roomNameField.setText("");
                             requestRoomList();
                         }
                     });
                 }
                 case PacketType.JOIN_ROOM_RES -> {
-                    int ok;
-                    String message;
-                    try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-                        ok = input.readUnsignedByte();
-                        message = input.readUTF();
-                    }
+                    Messages.StatusResponse res =
+                            Messages.StatusResponse.decode(packet.getPayload());
                     SwingUtilities.invokeLater(() -> {
                         RoomEntry joined = joiningRoom;
                         joiningRoom = null;
-                        if (ok == 1 && joined != null) {
+                        if (res.ok() && joined != null) {
                             handedOff = true;
                             List<Packet> buffered;
                             synchronized (joinPacketLock) {
@@ -253,15 +237,12 @@ public class HomeUI {
                             joinButton.setEnabled(connectionAlive
                                     && roomList.getSelectedValue() != null
                                     && audioSocket != null);
-                            showStatus(message, true);
+                            showStatus(res.message(), true);
                         }
                     });
                 }
                 case PacketType.ERROR -> {
-                    String message;
-                    try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-                        message = input.readUTF();
-                    }
+                    String message = Messages.ErrorMessage.decode(packet.getPayload()).message();
                     SwingUtilities.invokeLater(() -> showStatus(message, true));
                 }
                 default -> {
@@ -270,24 +251,6 @@ public class HomeUI {
             }
         } catch (IOException e) {
             SwingUtilities.invokeLater(() -> showStatus("Phản hồi máy chủ không hợp lệ.", true));
-        }
-    }
-
-    private static List<RoomInfo> readRoomList(Packet packet) throws IOException {
-        try (DataInputStream input = PacketUtils.payloadReader(packet.getPayload())) {
-            int count = input.readInt();
-            if (count < 0 || count > 100_000) {
-                throw new IOException("Số lượng lớp không hợp lệ: " + count);
-            }
-            List<RoomInfo> rooms = new ArrayList<>(count);
-            for (int i = 0; i < count; i++) {
-                rooms.add(new RoomInfo(
-                        input.readInt(),
-                        input.readUTF(),
-                        input.readUTF(),
-                        input.readInt()));
-            }
-            return rooms;
         }
     }
 

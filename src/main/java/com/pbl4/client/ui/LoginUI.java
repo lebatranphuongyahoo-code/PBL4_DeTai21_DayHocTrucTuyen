@@ -3,9 +3,9 @@ package com.pbl4.client.ui;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
-import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
 import com.pbl4.common.Sha256;
+import com.pbl4.common.msg.Messages;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -18,7 +18,6 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
 import java.awt.GridLayout;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.ExecutionException;
@@ -161,13 +160,9 @@ public class LoginUI {
                 : PacketType.REGISTER_REQ;
 
         try {
-            byte[] payload = PacketUtils.buildPayload(output -> {
-                output.writeUTF(username);
-                output.writeUTF(passwordHash);
-                if (request == PendingRequest.REGISTER) {
-                    output.writeUTF(role);
-                }
-            });
+            byte[] payload = request == PendingRequest.LOGIN
+                    ? new Messages.LoginRequest(username, passwordHash).encode()
+                    : new Messages.RegisterRequest(username, passwordHash, role).encode();
             pendingRequest = request;
             setButtonsEnabled(false);
             showMessage(request == PendingRequest.LOGIN ? "Đang đăng nhập..." : "Đang đăng ký...", false);
@@ -185,11 +180,14 @@ public class LoginUI {
             return;
         }
         try {
-            try (DataInputStream response = PacketUtils.payloadReader(packet.getPayload())) {
-                int ok = response.readUnsignedByte();
-                String message = response.readUTF();
-                String role = packet.getType() == PacketType.LOGIN_RES ? response.readUTF() : "";
-                SwingUtilities.invokeLater(() -> handleResponse(packet.getType(), ok, message, role));
+            if (packet.getType() == PacketType.LOGIN_RES) {
+                Messages.LoginResponse res = Messages.LoginResponse.decode(packet.getPayload());
+                SwingUtilities.invokeLater(() ->
+                        handleResponse(packet.getType(), res.ok(), res.message(), res.role()));
+            } else {
+                Messages.StatusResponse res = Messages.StatusResponse.decode(packet.getPayload());
+                SwingUtilities.invokeLater(() ->
+                        handleResponse(packet.getType(), res.ok(), res.message(), ""));
             }
         } catch (IOException e) {
             SwingUtilities.invokeLater(() -> {
@@ -200,7 +198,7 @@ public class LoginUI {
         }
     }
 
-    private void handleResponse(byte type, int ok, String message, String role) {
+    private void handleResponse(byte type, boolean ok, String message, String role) {
         PendingRequest expected = type == PacketType.LOGIN_RES
                 ? PendingRequest.LOGIN
                 : PendingRequest.REGISTER;
@@ -211,14 +209,14 @@ public class LoginUI {
         pendingRequest = null;
         setButtonsEnabled(connected);
         if (expected == PendingRequest.LOGIN) {
-            if (ok == 1) {
+            if (ok) {
                 handedOff = true;
                 new HomeUI(connection, usernameField.getText().trim(), role, serverIp);
                 frame.dispose();
             } else {
                 showMessage(message, true);
             }
-        } else if (ok == 1) {
+        } else if (ok) {
             showMessage("Đăng ký thành công. Bạn có thể đăng nhập.", false);
         } else {
             showMessage(message, true);

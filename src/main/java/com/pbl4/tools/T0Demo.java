@@ -2,9 +2,8 @@ package com.pbl4.tools;
 
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
-import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
-import com.pbl4.common.Sha256;
+import com.pbl4.common.msg.Messages;
 import com.pbl4.server.ClientHandler;
 import com.pbl4.server.Room;
 import com.pbl4.server.RoomManager;
@@ -12,7 +11,6 @@ import com.pbl4.server.ServerConfig;
 import com.pbl4.server.ServerMain;
 import com.pbl4.server.db.DatabaseManager;
 
-import java.io.DataInputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
@@ -101,9 +99,11 @@ public class T0Demo {
             check("giao vien dang nhap duoc", true);
 
             teacher.send(PacketType.CREATE_ROOM_REQ,
-                    PacketUtils.buildPayload(o -> o.writeUTF("Toan roi rac")));
+                    new Messages.CreateRoomRequest("Toan roi rac").encode());
             Packet created = teacher.await(PacketType.CREATE_ROOM_RES, 3000);
-            int roomId = readRoomId(created);
+            int roomId = created == null
+                    ? -1
+                    : Messages.CreateRoomResponse.decode(created.getPayload()).roomId();
             check("tao lop duoc, ma lop = " + roomId, roomId > 0);
             check("ma lop la so 6 chu so",
                     roomId >= Protocol.ROOM_ID_MIN && roomId <= Protocol.ROOM_ID_MAX);
@@ -135,7 +135,7 @@ public class T0Demo {
                     // ============ 3. Không tin client ============
                     section("3. Kiem tra quyen o server (khong tin client)");
                     s1.send(PacketType.SCREEN_START,
-                            PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                            new Messages.RoomIdOnly(roomId).encode());
                     Packet denied = s1.awaitEither(PacketType.SCREEN_START, PacketType.ERROR, 2000);
                     check("hoc sinh bi TU CHOI chia se man hinh",
                             denied != null && denied.getType() == PacketType.ERROR);
@@ -145,7 +145,7 @@ public class T0Demo {
                     // ============ 4. Giáo viên chia sẻ màn hình ============
                     section("4. Giao vien chia se man hinh + 1 client MANG CHAM");
                     teacher.send(PacketType.SCREEN_START,
-                            PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                            new Messages.RoomIdOnly(roomId).encode());
                     Packet ok = teacher.awaitEither(PacketType.SCREEN_START, PacketType.ERROR, 2000);
                     check("giao vien duoc phep chia se man hinh",
                             ok != null && ok.getType() == PacketType.SCREEN_START);
@@ -201,14 +201,16 @@ public class T0Demo {
                     // ============ 6. Rời lớp ============
                     section("6. Roi lop, cap nhat USER_LIST, don lop rong");
                     s2.send(PacketType.LEAVE_ROOM_REQ,
-                            PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                            new Messages.RoomIdOnly(roomId).encode());
                     Packet listAfter = s1.await(PacketType.USER_LIST, 2000);
-                    int remaining = readUserCount(listAfter);
+                    int remaining = listAfter == null
+                            ? -1
+                            : Messages.UserList.decode(listAfter.getPayload()).members().size();
                     check("sau khi 1 nguoi roi, USER_LIST con " + remaining + " nguoi",
                             remaining == 3);
 
                     teacher.send(PacketType.SCREEN_STOP,
-                            PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+                            new Messages.RoomIdOnly(roomId).encode());
                     Thread.sleep(200);
                 }
             }
@@ -337,7 +339,7 @@ public class T0Demo {
     /** Giáo viên đã ở trong lớp rồi — ở đây chỉ bật mic, nói, rồi tắt mic. */
     private void sendAudio(TestClient.Conn teacher, int roomId, int seconds)
             throws Exception {
-        teacher.send(PacketType.AUDIO_ON, PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+        teacher.send(PacketType.AUDIO_ON, new Messages.RoomIdOnly(roomId).encode());
 
         byte[] packet = new byte[Protocol.UDP_PACKET_BYTES];
         TestClient.writeInt(packet, Protocol.UDP_OFFSET_ROOM_ID, roomId);
@@ -354,7 +356,7 @@ public class T0Demo {
                 Thread.sleep(targetMs - elapsedMs);
             }
         }
-        teacher.send(PacketType.AUDIO_OFF, PacketUtils.buildPayload(o -> o.writeInt(roomId)));
+        teacher.send(PacketType.AUDIO_OFF, new Messages.RoomIdOnly(roomId).encode());
     }
 
     // ==================================================================
@@ -371,31 +373,6 @@ public class T0Demo {
             }
         }
         return null;
-    }
-
-    private int readRoomId(Packet res) {
-        if (res == null) {
-            return -1;
-        }
-        try {
-            DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-            r.readByte();
-            r.readUTF();
-            return r.readInt();
-        } catch (Exception e) {
-            return -1;
-        }
-    }
-
-    private int readUserCount(Packet userList) {
-        if (userList == null) {
-            return -1;
-        }
-        try {
-            return PacketUtils.payloadReader(userList.getPayload()).readInt();
-        } catch (Exception e) {
-            return -1;
-        }
     }
 
     private void section(String title) {
