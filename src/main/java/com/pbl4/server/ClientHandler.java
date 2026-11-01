@@ -4,9 +4,7 @@ import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
 import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
-import com.pbl4.common.RoomInfo;
 import com.pbl4.common.msg.Messages;
-import com.pbl4.server.db.DatabaseManager;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -14,12 +12,9 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -53,8 +48,7 @@ public class ClientHandler implements Runnable {
 
     private final int clientId = SEQ.incrementAndGet();
     private final Socket socket;
-    private final RoomManager rooms;
-    private final DatabaseManager db;
+    private final ServerContext context;
 
     private DataInputStream in;
     private DataOutputStream out;
@@ -83,10 +77,9 @@ public class ClientHandler implements Runnable {
     private final AtomicLong framesDropped = new AtomicLong();
     private final AtomicLong bytesSent = new AtomicLong();
 
-    public ClientHandler(Socket socket, RoomManager rooms, DatabaseManager db) {
+    public ClientHandler(Socket socket, ServerContext context) {
         this.socket = socket;
-        this.rooms = rooms;
-        this.db = db;
+        this.context = context;
     }
 
     // ==================================================================
@@ -130,7 +123,7 @@ public class ClientHandler implements Runnable {
 
     private void cleanup() {
         running = false;
-        leaveCurrentRoom();
+        context.room().leaveCurrentRoom(this);
         if (writerThread != null) {
             writerThread.interrupt();
         }
@@ -234,36 +227,43 @@ public class ClientHandler implements Runnable {
         return udpAddress;
     }
 
-    public int getUdpPort() {
-        return udpPort;
+    public int getUdpPort() { return udpPort; }
+    public String getUsername() { return username; }
+    public String getRole() { return role; }
+    public int getRoomId() { return roomId; }
+    public boolean isMicOn() { return micOn; }
+    public long getFramesSent() { return framesSent.get(); }
+    public long getFramesDropped() { return framesDropped.get(); }
+    public long getBytesSent() { return bytesSent.get(); }
+
+    // ==================================================================
+    // API cho handler
+    // ==================================================================
+
+    /** Ghi nhận đăng nhập thành công. */
+    public void markLoggedIn(String user, String userRole) { this.username = user; this.role = userRole; }
+
+    /** Ghi nhận đã vào lớp; địa chỉ UDP = địa chỉ IP của kết nối TCP + cổng client báo. */
+    public void enterRoom(int newRoomId, int clientUdpPort) {
+        this.roomId = newRoomId;
+        this.udpAddress = socket.getInetAddress();
+        this.udpPort = clientUdpPort;
     }
 
-    public String getUsername() {
-        return username;
+    /** Xoá trạng thái lớp, trả về mã lớp cũ (-1 nếu không ở lớp nào). */
+    public int clearRoomState() {
+        int previous = roomId;
+        roomId = -1; udpPort = -1; udpAddress = null; micOn = false;
+        return previous;
     }
 
-    public String getRole() {
-        return role;
-    }
+    public void setMicOn(boolean on) { this.micOn = on; }
 
-    public int getRoomId() {
-        return roomId;
-    }
+    public boolean isLoggedIn() { return username != null; }
 
-    public boolean isMicOn() {
-        return micOn;
-    }
-
-    public long getFramesSent() {
-        return framesSent.get();
-    }
-
-    public long getFramesDropped() {
-        return framesDropped.get();
-    }
-
-    public long getBytesSent() {
-        return bytesSent.get();
+    /** In log kèm tên luồng hiện tại — giữ đúng định dạng "[ten-luong] noi dung". */
+    public void log(String message) {
+        System.out.println("[" + Thread.currentThread().getName() + "] " + message);
     }
 
     // ==================================================================
@@ -273,21 +273,21 @@ public class ClientHandler implements Runnable {
     private void handle(Packet packet) throws IOException {
         switch (packet.getType()) {
 
-            case PacketType.LOGIN_REQ -> handleLogin(packet);
-            case PacketType.REGISTER_REQ -> handleRegister(packet);
+            case PacketType.LOGIN_REQ -> context.auth().handleLogin(this, packet);
+            case PacketType.REGISTER_REQ -> context.auth().handleRegister(this, packet);
 
-            case PacketType.CREATE_ROOM_REQ -> handleCreateRoom(packet);
-            case PacketType.JOIN_ROOM_REQ -> handleJoinRoom(packet);
-            case PacketType.LEAVE_ROOM_REQ -> handleLeaveRoom(packet);
-            case PacketType.ROOM_LIST_REQ -> handleRoomList();
-            case PacketType.CHAT_TEXT -> handleChat(packet);
+            case PacketType.CREATE_ROOM_REQ -> context.room().handleCreateRoom(this, packet);
+            case PacketType.JOIN_ROOM_REQ -> context.room().handleJoinRoom(this, packet);
+            case PacketType.LEAVE_ROOM_REQ -> context.room().handleLeaveRoom(this, packet);
+            case PacketType.ROOM_LIST_REQ -> context.room().handleRoomList(this);
+            case PacketType.CHAT_TEXT -> context.room().handleChat(this, packet);
 
-            case PacketType.SCREEN_START -> handleScreenStart();
-            case PacketType.SCREEN_STOP -> handleScreenStop();
-            case PacketType.SCREEN_FRAME -> handleScreenFrame(packet);
+            case PacketType.SCREEN_START -> context.screen().handleScreenStart(this);
+            case PacketType.SCREEN_STOP -> context.screen().handleScreenStop(this);
+            case PacketType.SCREEN_FRAME -> context.screen().handleScreenFrame(this, packet);
 
-            case PacketType.AUDIO_ON -> handleAudioOn();
-            case PacketType.AUDIO_OFF -> handleAudioOff();
+            case PacketType.AUDIO_ON -> context.audio().handleAudioOn(this);
+            case PacketType.AUDIO_OFF -> context.audio().handleAudioOff(this);
 
             default -> {
                 log("goi khong ho tro: " + packet.typeName());
@@ -296,269 +296,9 @@ public class ClientHandler implements Runnable {
         }
     }
 
-    // ---------- Tài khoản (TV3 cài đặt DatabaseManager) ----------
-
-    private void handleLogin(Packet packet) throws IOException {
-        Messages.LoginRequest req = Messages.LoginRequest.decode(packet.getPayload());
-        String user = req.username();
-        String hash = req.passwordHash();
-
-        String foundRole = db.authenticate(user, hash);
-        if (foundRole == null) {
-            sendControl(PacketType.LOGIN_RES,
-                    new Messages.LoginResponse(false, "Sai ten dang nhap hoac mat khau", "").encode());
-            log("dang nhap that bai: " + user);
-            return;
-        }
-
-        this.username = user;
-        this.role = foundRole;
-        sendControl(PacketType.LOGIN_RES,
-                new Messages.LoginResponse(true, "Dang nhap thanh cong", foundRole).encode());
-        log("dang nhap thanh cong: " + user + " (" + foundRole + ")");
-    }
-
-    private void handleRegister(Packet packet) throws IOException {
-        Messages.RegisterRequest req = Messages.RegisterRequest.decode(packet.getPayload());
-        String user = req.username();
-        String hash = req.passwordHash();
-        String requestedRole = req.role();
-
-        // Không tin client: role phải là một trong hai giá trị hợp lệ.
-        if (!Protocol.isValidRole(requestedRole)) {
-            sendControl(PacketType.REGISTER_RES,
-                    new Messages.StatusResponse(false, "Vai tro khong hop le").encode());
-            return;
-        }
-
-        boolean ok = db.register(user, hash, requestedRole);
-        sendControl(PacketType.REGISTER_RES,
-                new Messages.StatusResponse(ok, ok ? "Dang ky thanh cong" : "Ten dang nhap da ton tai").encode());
-        log("dang ky " + user + " (" + requestedRole + ") -> " + (ok ? "OK" : "trung ten"));
-    }
-
-    // ---------- Phòng học ----------
-
-    private void handleCreateRoom(Packet packet) throws IOException {
-        if (!requireLogin() || !requireTeacher()) {
-            return;
-        }
-        String roomName = Messages.CreateRoomRequest.decode(packet.getPayload()).roomName().trim();
-        if (roomName.isEmpty()) {
-            sendControl(PacketType.CREATE_ROOM_RES,
-                    new Messages.CreateRoomResponse(false, "Ten lop khong duoc de trong", -1).encode());
-            return;
-        }
-
-        // Cơ sở dữ liệu cấp mã phòng, rồi TV1 mở lớp đó trong RAM.
-        int newRoomId = db.createRoom(roomName, username);
-        rooms.createRoom(newRoomId, roomName, username);
-
-        sendControl(PacketType.CREATE_ROOM_RES,
-                new Messages.CreateRoomResponse(true, "Da tao lop " + roomName, newRoomId).encode());
-        log("tao lop '" + roomName + "' ma " + newRoomId + " boi " + username);
-    }
-
-    private void handleJoinRoom(Packet packet) throws IOException {
-        if (!requireLogin()) {
-            return;
-        }
-        Messages.JoinRoomRequest req = Messages.JoinRoomRequest.decode(packet.getPayload());
-        int targetRoomId = req.roomId();
-        int clientUdpPort = req.udpPort();
-
-        Room room = rooms.get(targetRoomId);
-        if (room == null) {
-            sendControl(PacketType.JOIN_ROOM_RES,
-                    new Messages.StatusResponse(false, "Lop khong ton tai hoac da dong").encode());
-            return;
-        }
-
-        // Mỗi client chỉ ở trong MỘT phòng tại một thời điểm (mục 1.5.4).
-        leaveCurrentRoom();
-
-        this.roomId = targetRoomId;
-        this.udpAddress = socket.getInetAddress();
-        this.udpPort = clientUdpPort;
-        room.addMember(this);
-
-        sendControl(PacketType.JOIN_ROOM_RES,
-                new Messages.StatusResponse(true, "Da vao lop " + room.getRoomName()).encode());
-        log("vao lop " + targetRoomId + " (" + username + "), cong UDP nhan thoai = " + clientUdpPort);
-
-        // Gửi lại danh sách thành viên cho TẤT CẢ mọi người trong lớp (bước 2.2).
-        int notified = room.broadcastUserList();
-        log("phat USER_LIST cho " + notified + " nguoi trong lop " + targetRoomId);
-    }
-
-    private void handleLeaveRoom(Packet packet) throws IOException {
-        int targetRoomId = Messages.RoomIdOnly.decode(packet.getPayload()).roomId();
-        if (targetRoomId != roomId) {
-            sendError("Ban khong o trong lop " + targetRoomId);
-            return;
-        }
-        leaveCurrentRoom();
-    }
-
-    /** Rời lớp hiện tại (nếu có), phát lại USER_LIST, và dọn lớp rỗng khỏi bộ nhớ. */
-    private void leaveCurrentRoom() {
-        int current = roomId;
-        if (current < 0) {
-            return;
-        }
-        roomId = -1;
-        udpPort = -1;
-        udpAddress = null;
-        micOn = false;
-
-        Room room = rooms.get(current);
-        if (room == null) {
-            return;
-        }
-        if (room.removeMember(this)) {
-            log("roi lop " + current + " (" + username + ")");
-            room.broadcastUserList();
-        }
-        if (room.isEmpty()) {
-            rooms.removeIfEmpty(current);
-            log("lop " + current + " khong con ai -> da xoa khoi bo nho");
-        }
-    }
-
-    private void handleRoomList() {
-        List<RoomInfo> stored = db.listRooms();
-        List<RoomInfo> list = new ArrayList<>(stored.size());
-        for (RoomInfo info : stored) {
-            list.add(new RoomInfo(info.roomId(), info.roomName(), info.teacherUsername(),
-                    rooms.memberCount(info.roomId())));
-        }
-        sendControl(PacketType.ROOM_LIST_RES, new Messages.RoomList(list).encode());
-    }
-
-    private void handleChat(Packet packet) throws IOException {
-        if (!requireLogin()) {
-            return;
-        }
-        Room room = currentRoom();
-        if (room == null) {
-            sendError("Ban chua o trong lop nao");
-            return;
-        }
-        try {
-            Messages.ChatText.decode(packet.getPayload());
-        } catch (IOException e) {
-            sendError("Tin nhan khong hop le");
-            return;
-        }
-        // Chuyển tiếp nguyên payload cho cả lớp, kể cả người gửi, để giao diện của họ
-        // hiển thị được tin nhắn của chính mình.
-        room.broadcastControl(PacketType.CHAT_TEXT, packet.getPayload());
-    }
-
-    // ---------- Chia sẻ màn hình ----------
-
-    /**
-     * Bước 3.1 — "không bao giờ tin client".
-     *
-     * <p>Gói {@code SCREEN_START} chỉ chứa {@code roomId}, client KHÔNG gửi kèm vai trò.
-     * Server tự kiểm tra vai trò của chính phiên đăng nhập này (đã lấy từ cơ sở dữ liệu lúc đăng nhập).
-     * Nếu kiểm tra ở giao diện client thì chỉ cần sửa client, hoặc dùng công cụ khác gửi gói,
-     * là qua được toàn bộ kiểm tra.</p>
-     */
-    private void handleScreenStart() {
-        if (!requireLogin()) {
-            return;
-        }
-        Room room = currentRoom();
-        if (room == null) {
-            sendError("Ban chua o trong lop nao");
-            return;
-        }
-        if (!Protocol.ROLE_TEACHER.equals(role)) {
-            log("TU CHOI chia se man hinh: " + username + " co vai tro " + role);
-            sendError("Chi giao vien duoc chia se man hinh");
-            return;   // KHÔNG bật cờ sharing
-        }
-
-        room.setSharing(true);
-        int n = room.broadcastControl(PacketType.SCREEN_START,
-                new Messages.ScreenNotice(room.getRoomId(), room.getTeacherUsername()).encode());
-        log("bat dau chia se man hinh lop " + room.getRoomId() + " (thong bao " + n + " nguoi)");
-    }
-
-    private void handleScreenStop() {
-        Room room = currentRoom();
-        if (room == null) {
-            return;
-        }
-        room.setSharing(false);
-        room.broadcastControl(PacketType.SCREEN_STOP,
-                new Messages.ScreenNotice(room.getRoomId(), "Giao vien da dung chia se man hinh").encode());
-        log("dung chia se man hinh lop " + room.getRoomId());
-    }
-
-    /**
-     * Bước 3.2 — chuyển tiếp frame.
-     *
-     * <p>Hai lớp bảo vệ: (1) phải đang ở trong lớp, (2) cờ chia sẻ của lớp phải đang bật.
-     * Nhờ (2), một client tự ý gửi frame mà không xin phép sẽ bị bỏ qua hoàn toàn.</p>
-     */
-    private void handleScreenFrame(Packet packet) {
-        Room room = currentRoom();
-        if (room == null || !room.isSharing()) {
-            return;   // bỏ qua, không relay
-        }
-        if (!Protocol.ROLE_TEACHER.equals(role)) {
-            return;
-        }
-        room.broadcastFrame(packet.getPayload());
-    }
-
-    // ---------- Mic ----------
-
-    private void handleAudioOn() {
-        Room room = currentRoom();
-        if (room == null) {
-            sendError("Ban chua o trong lop nao");
-            return;
-        }
-        if (!hasUdpAddress()) {
-            sendError("Ban chua bao cong UDP khi vao lop");
-            return;
-        }
-        micOn = true;
-        log("bat mic: " + username + " (UDP " + udpAddress.getHostAddress() + ":" + udpPort + ")");
-    }
-
-    private void handleAudioOff() {
-        micOn = false;
-        log("tat mic: " + username);
-    }
-
     // ==================================================================
     // Tiện ích
     // ==================================================================
-
-    private boolean requireLogin() {
-        if (username == null) {
-            sendError("Ban chua dang nhap");
-            return false;
-        }
-        return true;
-    }
-
-    private boolean requireTeacher() {
-        if (!Protocol.ROLE_TEACHER.equals(role)) {
-            sendError("Chi giao vien duoc tao lop");
-            return false;
-        }
-        return true;
-    }
-
-    private Room currentRoom() {
-        int current = roomId;
-        return (current < 0) ? null : rooms.get(current);
-    }
 
     /** Nhãn ngắn để log dễ đọc. */
     private String label() {
@@ -566,17 +306,8 @@ public class ClientHandler implements Runnable {
                 + "@" + socket.getRemoteSocketAddress();
     }
 
-    private void log(String message) {
-        System.out.println("[" + Thread.currentThread().getName() + "] " + message);
-    }
-
     @Override
     public String toString() {
         return label();
-    }
-
-    /** Cho phép các lớp khác (ví dụ lớp thống kê) lấy OutputStream nếu cần. */
-    public OutputStream rawOutput() {
-        return out;
     }
 }

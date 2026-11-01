@@ -34,6 +34,7 @@ public class ServerMain {
 
     private final RoomManager rooms;
     private final DatabaseManager db;
+    private final ServerContext context;
     private final ExecutorService threadPool;
     private final ServerSocket serverSocket;
     private final AudioRelayServer audioRelay;
@@ -45,6 +46,7 @@ public class ServerMain {
     public ServerMain(ServerConfig config, RoomManager rooms, DatabaseManager db) throws IOException {
         this.rooms = rooms;
         this.db = db;
+        this.context = ServerContext.create(rooms, db);
         // Không truyền ThreadFactory riêng: mặc định của JDK đã đặt tên đúng dạng
         // "pool-1-thread-1", "pool-1-thread-2"... — chính là dạng tên mà tài liệu
         // yêu cầu in ra để chứng minh là dùng thread pool chứ không phải luồng chính.
@@ -97,7 +99,7 @@ public class ServerMain {
                 Socket socket = serverSocket.accept();
                 connectedClients.incrementAndGet();
                 // Vòng lặp quay lại ngay — việc nặng đã giao cho pool.
-                threadPool.execute(new ClientHandler(socket, rooms, db));
+                threadPool.execute(new ClientHandler(socket, context));
             }
 
         } catch (IOException e) {
