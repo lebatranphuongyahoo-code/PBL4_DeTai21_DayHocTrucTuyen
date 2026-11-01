@@ -1,0 +1,172 @@
+# Mốc ban đầu trước refactor (`baseline.md`)
+
+> Đo ngày 01/11/2026 trên nhánh `refactor/chuan-hoa-cau-truc` tách từ `main = ec82a22`.
+
+## 0.2 Đầu ra nguyên văn trước refactor
+
+### Môi trường
+```text
+java version "21.0.9" 2025-10-21 LTS
+Apache Maven 3.9.16 (2bdd9fddda4b155ebf8000e807eb73fd829a51d5)
+```
+
+### `PacketRoundTripTest`
+```text
+  [OK]   round-trip
+round-trip OK | type=18 | payload=5 byte
+   (do dai ghi tren duong truyen = 10 byte = 4 + 1 + 5)
+  [OK]   payload rong -> do dai = 1
+  [OK]   payload rong doc lai duoc
+  [OK]   frame 62 KB nguyen ven
+   frame lon: 62005 byte tren duong truyen
+  [OK]   3 goi lien tiep khong dinh nhau
+  [OK]   tu choi do dai rac
+
+==> TAT CA KIEM TRA DAT (5/5)
+```
+
+### `T0Demo`
+```text
+########################################################
+#  BAI KIEM THU MUC T0 - PBL4 De tai 21 (Day hoc truc tuyen)
+#  Phan cua TV1: server da luong + phong hoc + relay
+########################################################
+
+[audio] Relay thoai dang lang nghe tren cong UDP 9001
+[main] ===== SERVER DANG CHAY =====
+[main] TCP  : 9000  (dieu khien + man hinh)
+[main] UDP  : 9001  (chi thoai PCM)
+[main] Pool : 50 luong, backlog 50
+[main] Payload toi da: 5000000 byte
+[main] Cho ket noi...
+
+--- 1. Giao vien dang nhap, tao lop, vao lop ---
+[pool-1-thread-1] client da ket noi tu /127.0.0.1:53165 | luong xu ly=pool-1-thread-1
+[pool-1-thread-1] dang ky lan (TEACHER) -> trung ten
+[pool-1-thread-1] dang nhap thanh cong: lan (TEACHER)
+   [DAT]   giao vien dang nhap duoc
+   [DAT]   tao lop duoc, ma lop = 838787
+   [DAT]   ma lop la so 6 chu so
+[pool-1-thread-1] tao lop 'Toan roi rac' ma 838787 boi lan
+   [DAT]   giao vien vao lop, lop co 1 nguoi
+
+--- 2. Hoc sinh vao lop va danh sach thanh vien ---
+[pool-1-thread-2] client da ket noi tu /127.0.0.1:53166 | luong xu ly=pool-1-thread-2
+[pool-1-thread-2] dang ky minh (STUDENT) -> trung ten
+[pool-1-thread-2] dang nhap thanh cong: minh (STUDENT)
+[pool-1-thread-2] vao lop 838787 (minh), cong UDP nhan thoai = 52915
+[pool-1-thread-1] vao lop 838787 (lan), cong UDP nhan thoai = 52914
+[pool-1-thread-1] phat USER_LIST cho 2 nguoi trong lop 838787
+[pool-1-thread-2] phat USER_LIST cho 2 nguoi trong lop 838787
+   [DAT]   hoc sinh 1 vao lop, lop co 2 nguoi
+[pool-1-thread-3] client da ket noi tu /127.0.0.1:53167 | luong xu ly=pool-1-thread-3
+[pool-1-thread-3] dang ky an (STUDENT) -> OK
+[pool-1-thread-3] dang nhap thanh cong: an (STUDENT)
+[pool-1-thread-3] vao lop 838787 (an), cong UDP nhan thoai = 52916
+[pool-1-thread-3] phat USER_LIST cho 3 nguoi trong lop 838787
+   [DAT]   hoc sinh 2 vao lop, lop co 3 nguoi
+
+--- 3. Kiem tra quyen o server (khong tin client) ---
+[pool-1-thread-2] TU CHOI chia se man hinh: minh co vai tro STUDENT
+   [DAT]   hoc sinh bi TU CHOI chia se man hinh
+   [DAT]   co chia se cua lop van = false (khong bat co sai)
+
+--- 4. Giao vien chia se man hinh + 1 client MANG CHAM ---
+[pool-1-thread-1] bat dau chia se man hinh lop 838787 (thong bao 3 nguoi)
+   [DAT]   giao vien duoc phep chia se man hinh
+   [DAT]   co sharing cua lop da bat
+[pool-1-thread-4] client da ket noi tu /127.0.0.1:53168 | luong xu ly=pool-1-thread-4
+[pool-1-thread-4] dang ky cham (STUDENT) -> OK
+[pool-1-thread-4] dang nhap thanh cong: cham (STUDENT)
+[pool-1-thread-4] vao lop 838787 (cham), cong UDP nhan thoai = 52917
+[pool-1-thread-4] phat USER_LIST cho 4 nguoi trong lop 838787
+   [DAT]   client mang cham vao lop, lop co 4 nguoi
+   [DAT]   hoc sinh binh thuong nhan duoc frame (30 frame)
+   [DAT]   client mang cham nhan duoc it frame hon (8 frame)
+   [DAT]   server BO FRAME cua client cham (dropped=22)
+   [DAT]   client binh thuong KHONG bi bo frame (dropped=0)
+   [DAT]   vung gang cua lop rat ngan (27.13 micro giay)
+
+--- 5. Chuyen tiep thoai UDP (648 byte/goi, 50 goi/giay) ---
+[pool-1-thread-4] client ngat ket noi (cham@/127.0.0.1:53168)
+[pool-1-thread-4] roi lop 838787 (cham)
+[pool-1-thread-4] da dong ket noi | doc 3 goi | gui 8 frame | bo 22 frame
+[pool-1-thread-1] bat mic: lan (UDP 127.0.0.1:52914)
+[stats] luong dang song=15 | client da ket noi=4 | lop mo=1 | nguoi online=3 | goi thoai da relay=12
+[stats]   lop 838787 'Toan roi rac' | 3 nguoi | sharing=true | giu khoa trung binh=26.51 us | 55 lan
+[audio] da relay 100 goi | 2 nguoi nhan | 11.7s | 0.06 MB
+[pool-1-thread-1] tat mic: lan
+   [DAT]   hoc sinh nhan duoc goi thoai (150 goi)
+   [DAT]   ti le mat goi < 5% (0%)
+
+--- 6. Roi lop, cap nhat USER_LIST, don lop rong ---
+[pool-1-thread-3] roi lop 838787 (an)
+   [DAT]   sau khi 1 nguoi roi, USER_LIST con 3 nguoi
+[pool-1-thread-1] dung chia se man hinh lop 838787
+[pool-1-thread-3] client ngat ket noi (an@/127.0.0.1:53167)
+[pool-1-thread-2] client ngat ket noi (minh@/127.0.0.1:53166)
+[pool-1-thread-3] da dong ket noi | doc 4 goi | gui 30 frame | bo 0 frame
+[pool-1-thread-1] client ngat ket noi (lan@/127.0.0.1:53165)
+[pool-1-thread-2] roi lop 838787 (minh)
+[pool-1-thread-1] roi lop 838787 (lan)
+
+--- 7. Kiem tra don lop rong khoi bo nho ---
+[pool-1-thread-2] lop 838787 khong con ai -> da xoa khoi bo nho
+[pool-1-thread-1] lop 838787 khong con ai -> da xoa khoi bo nho
+[pool-1-thread-2] da dong ket noi | doc 4 goi | gui 30 frame | bo 0 frame
+[pool-1-thread-1] da dong ket noi | doc 38 goi | gui 30 frame | bo 0 frame
+   [DAT]   khong con lop nao trong bo nho (rooms=0)
+[main] Dang dung server...
+[main] Server da dung binh thuong.
+[audio] Relay thoai da dung.
+
+########################################################
+#  KET QUA: 20 DAT / 20 TONG
+########################################################
+```
+
+### `LoadTest 10 3`
+```text
+########################################################
+#  DO TAI MUC T3 - Thread Pool / CPU / RAM
+#  PBL4 De tai 21 - phan cua TV1
+########################################################
+[main] ===== SERVER DANG CHAY =====
+[audio] Relay thoai dang lang nghe tren cong UDP 9001
+[main] TCP  : 9000  (dieu khien + man hinh)
+[main] UDP  : 9001  (chi thoai PCM)
+[main] Pool : 50 luong, backlog 50
+[main] Payload toi da: 5000000 byte
+[main] Cho ket noi...
+
+Muc nen (chua co client nao): pool=0 writer=0 tong=10
+
+Lop do tai: ma 466322
+
+So KH  | pool-    | srv-writer | tong     | CPU %    | Heap MB   | Nhan xet
+-------+----------+------------+----------+----------+-----------+------------------
+1      | 2        | 2          | 16       | 6.9      | 12        | dung thiet ke
+3      | 4        | 4          | 22       | 1.0      | 15        | dung thiet ke
+5      | 6        | 6          | 28       | 0.3      | 18        | dung thiet ke
+10     | 11       | 11         | 43       | 0.4      | 7         | dung thiet ke
+
+Giu tai 3 giay...
+Luc cao nhat: pool=11 (tran 50) | writer=11 (= 1 luong/ket noi)
+Nguoi online tren server: 11 | lop mo: 1
+
+Sau khi ngat het: pool=11 (truoc do 11) | writer=0 (truoc do 11) | tong=21
+Lop con lai trong bo nho: 0
+
+########## KET LUAN DO TAI ##########
+   [DAT]   luong ghi cua client tra ve 0 sau khi ngat (khong ro ri luong)
+   [DAT]   luong pool khong vuot tran 50
+   [DAT]   so luong pool khong tang them sau khi ngat het
+   [DAT]   tat ca lop da duoc don khoi bo nho
+
+==> 4 DAT / 4 TONG
+```
+
+## 0.3 Kiểm thư mục rác
+
+- `git ls-files .git.broken-20261027` → rỗng (chưa từng được git theo dõi; đã thêm `.git.broken-*/` vào `.gitignore` theo quyết định của Minh).
+- `git ls-files pbl4.db` → rỗng (đã được ignore bởi `*.db`).
