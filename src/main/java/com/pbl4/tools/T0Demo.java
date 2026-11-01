@@ -219,7 +219,15 @@ public class T0Demo {
 
         // ============ 7. Dọn lớp rỗng ============
         section("7. Kiem tra don lop rong khoi bo nho");
-        
+
+        // Việc dọn lớp chạy trên luồng của server SAU khi socket đóng (đọc EOF -> cleanup),
+        // nên ngay sau close() thì lớp rỗng có thể còn trong bộ nhớ vài mili giây.
+        // Chờ tối đa 3 giây thay vì đọc đúng một lần — nếu không, bài đo sẽ "đỏ" ngẫu nhiên
+        // tuỳ tốc độ máy, mà lỗi thì không có thật.
+        long deadline = System.currentTimeMillis() + 3000;
+        while (rooms.size() > 0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
         check("khong con lop nao trong bo nho (rooms=" + rooms.size() + ")",
                 rooms.size() == 0);
     }
