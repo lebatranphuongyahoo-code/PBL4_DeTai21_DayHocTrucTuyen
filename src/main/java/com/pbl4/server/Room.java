@@ -196,6 +196,10 @@ public class Room {
         this.sharing = sharing;
     }
 
+    public boolean isOwner(String user) {
+        return teacherUsername.equals(user);
+    }
+
     // ==================================================================
     // Getter + số liệu
     // ==================================================================

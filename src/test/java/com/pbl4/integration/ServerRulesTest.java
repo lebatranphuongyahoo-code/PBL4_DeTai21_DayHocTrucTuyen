@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -128,5 +129,69 @@ class ServerRulesTest {
         } finally {
             s2.stop();
         }
+    }
+
+    // ==================================================================
+    // B3 — Chỉ giáo viên chủ lớp được bật/tắt/gửi màn hình
+    // ==================================================================
+
+    @Test
+    @Timeout(20)
+    void studentCannotStopTeacherShare() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B3");
+        assertTrue(gv.join(id, 0));
+
+        Conn hs = client("hs1", Protocol.ROLE_STUDENT);
+        assertTrue(hs.join(id, 0));
+
+        gv.send(PacketType.SCREEN_START, new Messages.RoomIdOnly(id).encode());
+        assertNotNull(gv.await(PacketType.SCREEN_START, 2000));
+        assertNotNull(hs.await(PacketType.SCREEN_START, 2000));
+        assertTrue(rooms.get(id).isSharing());
+
+        hs.send(PacketType.SCREEN_STOP, new Messages.RoomIdOnly(id).encode());
+        Packet err = hs.await(PacketType.ERROR, 2000);
+        assertNotNull(err);
+        assertTrue(Messages.ErrorMessage.decode(err.getPayload()).message()
+                .toLowerCase().contains("chi giao vien"));
+        assertTrue(rooms.get(id).isSharing());
+    }
+
+    @Test
+    @Timeout(20)
+    void otherTeacherCannotShare() throws Exception {
+        Conn gv1 = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv1.createRoom("Lop B3");
+        assertTrue(gv1.join(id, 0));
+
+        Conn gv2 = client("gv2", Protocol.ROLE_TEACHER);
+        assertTrue(gv2.join(id, 0));
+
+        gv2.send(PacketType.SCREEN_START, new Messages.RoomIdOnly(id).encode());
+        Packet err = gv2.await(PacketType.ERROR, 2000);
+        assertNotNull(err);
+        assertTrue(Messages.ErrorMessage.decode(err.getPayload()).message()
+                .toLowerCase().contains("chi giao vien"));
+        assertFalse(rooms.get(id).isSharing());
+    }
+
+    @Test
+    @Timeout(20)
+    void ownerCanStopShare() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B3");
+        assertTrue(gv.join(id, 0));
+
+        Conn hs = client("hs1", Protocol.ROLE_STUDENT);
+        assertTrue(hs.join(id, 0));
+
+        gv.send(PacketType.SCREEN_START, new Messages.RoomIdOnly(id).encode());
+        assertNotNull(hs.await(PacketType.SCREEN_START, 2000));
+        assertTrue(rooms.get(id).isSharing());
+
+        gv.send(PacketType.SCREEN_STOP, new Messages.RoomIdOnly(id).encode());
+        assertNotNull(hs.await(PacketType.SCREEN_STOP, 2000));
+        assertFalse(rooms.get(id).isSharing());
     }
 }
