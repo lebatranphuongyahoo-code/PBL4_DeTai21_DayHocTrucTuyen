@@ -103,45 +103,27 @@ try {
 ### 4.2 Các bước (theo đúng `README.md` 6.2)
 
 ```bash
-cd E:/PBL4_DeTai21
-git checkout -b exp/hold-lock          # nhánh thí nghiệm, KHÔNG đụng main
-# sửa Room.broadcastFrame() thành bản A
-env -u MSYS_NO_PATHCONV -u MSYS2_ARG_CONV_EXCL mvn -o -q clean package
-```
-
-Cửa sổ 1 — server:
-```bash
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.server.ServerMain
-```
-
-Cửa sổ 2 — giáo viên tạo lớp, rồi share:
-```bash
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 auth gv1 123 TEACHER
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 create "Lop test"
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 join 1
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-send 1 30
-```
-
-Cửa sổ 3 — học sinh bình thường (đây là **biến phụ thuộc** phải đo):
-```bash
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 join 1
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv 1 30
-```
-
-Cửa sổ 4 — học sinh **mạng chậm** (tham số thứ ba `200` = giả lập trễ 200 ms):
-```bash
-java -cp target/...jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv 1 30 200
+# Cua so 1: server
+java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar
+# Cua so 2: giao vien tao lop, cho 15 giay, roi chia se 30 giay -> chep ROOM_ID in ra
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-send new 30 15
+# Cua so 3: hoc sinh binh thuong (trong 15 giay do)
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv <ROOM_ID> 40
+# Cua so 4: hoc sinh MANG CHAM
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv <ROOM_ID> 40 200
 ```
 
 > Lặp lại **đúng 3 lần** mỗi bản, mỗi lần 30 giây. Con số đưa vào bảng là **trung vị** của 3 lần
-> — đừng lấy lần đẹp nhất.
+> — đừng lấy lần đẹp nhất. Lưu ý: độ trễ chỉ đúng khi bên gửi và bên nhận chạy trên cùng một máy.
+>
+> **Ghi chú:** Bản A cần thiết kế riêng — xem `KE_HOACH_REFACTOR.md` mục 11, câu hỏi Q2.
 
 ### 4.3 Bảng phải điền (chép vào `docs/do-dac/thi-nghiem-4-2.md`)
 
-| Cấu hình | Học sinh bình thường nhận được | Frame/giây thực tế | Frame bị bỏ |
-|---|---|---|---|
-| **Bản A** — giữ khoá khi gửi | … | … | 0 |
-| **Bản B** — nhả khoá trước khi gửi | … | … | > 0 |
+| Cấu hình | Học sinh bình thường nhận được | Frame/giây thực tế | Độ trễ p50/p95 (ms) | Frame bị bỏ |
+|---|---|---|---|---|
+| **Bản A** — giữ khoá khi gửi | … | … | … | 0 |
+| **Bản B** — nhả khoá trước khi gửi | … | … | … | > 0 |
 
 ### 4.4 Dự đoán kết quả — và điều sẽ rút ra
 

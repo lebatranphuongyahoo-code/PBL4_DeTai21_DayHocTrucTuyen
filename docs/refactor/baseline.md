@@ -170,3 +170,74 @@ Lop con lai trong bo nho: 0
 
 - `git ls-files .git.broken-20261027` → rỗng (chưa từng được git theo dõi; đã thêm `.git.broken-*/` vào `.gitignore` theo quyết định của Minh).
 - `git ls-files pbl4.db` → rỗng (đã được ignore bởi `*.db`).
+
+---
+
+## Sau 1B — Thí nghiệm 4 tiến trình (`TestClient` tự đăng nhập + tạo lớp + đo độ trễ)
+
+### Cửa sổ 2 — Giáo viên (`screen-send new 6 3`)
+```text
+[test] dang nhap: gv8884 (TEACHER)
+ROOM_ID=388085
+[test] cho 3 giay de hoc sinh vao lop...
+[test] da gui 60 frame | 60.5 KB/frame | 10.0 fps | 5.0 Mbps
+[test] xong.
+```
+
+### Cửa sổ 3 — Học sinh bình thường (`screen-recv 388085 9`)
+```text
+[test] dang nhap: hs7977 (STUDENT)
+[test] da nhan 60 frame | 60.5 KB/frame | 6.4 fps | 3.72 MB
+[test] do tre frame (ms): tb=20.2 | p50=16 | p95=32 | max=48 | n=60
+[test] xong.
+```
+
+### Cửa sổ 4 — Học sinh mạng chậm (`screen-recv 388085 9 200`)
+```text
+[test] dang nhap: hs6665 (STUDENT)
+[test] CHE DO MANG CHAM: doc cham 200 ms/frame
+[test] da nhan 36 frame | 60.5 KB/frame | 4.0 fps | 2.23 MB
+[test] do tre frame (ms): tb=1036.4 | p50=1180 | p95=1375 | max=1394 | n=36
+[test] xong.
+```
+
+### Cửa sổ 1 — Server (`java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar`)
+```text
+[audio] Relay thoai dang lang nghe tren cong UDP 9001
+[main] ===== SERVER DANG CHAY =====
+[main] TCP  : 9000  (dieu khien + man hinh)
+[main] UDP  : 9001  (chi thoai PCM)
+[main] Pool : 50 luong, backlog 50
+[main] Payload toi da: 5000000 byte
+[main] Cho ket noi...
+[pool-1-thread-1] client da ket noi tu /127.0.0.1:51176 | luong xu ly=pool-1-thread-1
+[pool-1-thread-1] dang ky gv8884 (TEACHER) -> OK
+[pool-1-thread-1] dang nhap thanh cong: gv8884 (TEACHER)
+[pool-1-thread-1] tao lop 'Thi nghiem 4.2' ma 388085 boi gv8884
+[pool-1-thread-1] vao lop 388085 (gv8884), cong UDP nhan thoai = 0
+[pool-1-thread-1] phat USER_LIST cho 1 nguoi trong lop 388085
+[pool-1-thread-2] client da ket noi tu /127.0.0.1:51177 | luong xu ly=pool-1-thread-2
+[pool-1-thread-2] dang ky hs7977 (STUDENT) -> OK
+[pool-1-thread-2] dang nhap thanh cong: hs7977 (STUDENT)
+[pool-1-thread-2] vao lop 388085 (hs7977), cong UDP nhan thoai = 0
+[pool-1-thread-2] phat USER_LIST cho 2 nguoi trong lop 388085
+[pool-1-thread-3] client da ket noi tu /127.0.0.1:51178 | luong xu ly=pool-1-thread-3
+[pool-1-thread-3] dang ky hs6665 (STUDENT) -> OK
+[pool-1-thread-3] dang nhap thanh cong: hs6665 (STUDENT)
+[pool-1-thread-3] vao lop 388085 (hs6665), cong UDP nhan thoai = 0
+[pool-1-thread-3] phat USER_LIST cho 3 nguoi trong lop 388085
+[pool-1-thread-1] bat dau chia se man hinh lop 388085 (thong bao 3 nguoi)
+[stats] luong dang song=9 | client da ket noi=3 | lop mo=1 | nguoi online=3 | goi thoai da relay=0
+[stats]   lop 388085 'Thi nghiem 4.2' | 3 nguoi | sharing=true | giu khoa trung binh=13.58 us | 50 lan
+[pool-1-thread-1] client ngat ket noi (gv8884@/127.0.0.1:51176)
+[pool-1-thread-1] roi lop 388085 (gv8884)
+[pool-1-thread-1] da dong ket noi | doc 65 goi | gui 60 frame | bo 0 frame
+[pool-1-thread-3] client ngat ket noi (hs6665@/127.0.0.1:51178)
+[pool-1-thread-3] roi lop 388085 (hs6665)
+[pool-1-thread-3] da dong ket noi | doc 3 goi | gui 36 frame | bo 24 frame
+[pool-1-thread-2] client ngat ket noi (hs7977@/127.0.0.1:51177)
+[pool-1-thread-2] roi lop 388085 (hs7977)
+[pool-1-thread-2] lop 388085 khong con ai -> da xoa khoi bo nho
+[pool-1-thread-2] da dong ket noi | doc 3 goi | gui 60 frame | bo 0 frame
+```
+

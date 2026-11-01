@@ -99,20 +99,21 @@ java -cp target/classes com.pbl4.tools.TestClient <host> <port> <lenh> [tham so]
 | `audio-send <roomId> <giây>` | Giả mic: gửi gói 648 byte ở 50 gói/giây |
 | `audio-recv <roomId> <giây>` | Nhận thoại, **đo tỉ lệ mất gói và số gói sai thứ tự** |
 
-Ví dụ chứng minh bước 3.3 (một client chậm không làm đứng cả lớp) — mở 3 cửa sổ:
+Ví dụ chứng minh bước 3.3 (một client chậm không làm đứng cả lớp) — mở 4 cửa sổ:
 
 ```bash
 # Cua so 1: server
-mvn exec:java
-# Cua so 2: giao vien chia se man hinh 30 giay
-java -cp target/classes com.pbl4.tools.TestClient 127.0.0.1 9000 screen-send 123456 30
-# Cua so 3 va 4: hoc sinh binh thuong va hoc sinh MANG CHAM
-java -cp target/classes com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv 123456 30
-java -cp target/classes com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv 123456 30 200
+java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar
+# Cua so 2: giao vien tao lop, cho 15 giay, roi chia se 30 giay -> chep ROOM_ID in ra
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-send new 30 15
+# Cua so 3: hoc sinh binh thuong (trong 15 giay do)
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv <ROOM_ID> 40
+# Cua so 4: hoc sinh MANG CHAM
+java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.TestClient 127.0.0.1 9000 screen-recv <ROOM_ID> 40 200
 ```
 
-Kỳ vọng: hai học sinh bình thường nhận frame đều; học sinh mạng chậm **không** làm hai bạn kia
-giật, và server in ra số frame đã bỏ của bạn đó.
+Kỳ vọng: học sinh bình thường nhận frame đều kèm thống kê độ trễ `p50/p95`; học sinh mạng chậm **không** làm bạn kia
+giật, và server in ra số frame đã bỏ của bạn đó. (Lưu ý: độ trễ chỉ đúng khi bên gửi và bên nhận chạy trên cùng một máy.)
 
 ---
 
