@@ -5,6 +5,7 @@ import com.pbl4.common.PacketType;
 import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
 import com.pbl4.common.RoomInfo;
+import com.pbl4.common.msg.Messages;
 import com.pbl4.server.db.DatabaseManager;
 
 import java.io.BufferedInputStream;
@@ -17,6 +18,7 @@ import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.SocketException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
@@ -198,8 +200,7 @@ public class ClientHandler implements Runnable {
 
     /** Gửi gói lỗi về client. */
     public boolean sendError(String message) {
-        return sendControl(PacketType.ERROR,
-                PacketUtils.buildPayload(o -> o.writeUTF(message)));
+        return sendControl(PacketType.ERROR, new Messages.ErrorMessage(message).encode());
     }
 
     /**
@@ -298,51 +299,41 @@ public class ClientHandler implements Runnable {
     // ---------- Tài khoản (TV3 cài đặt DatabaseManager) ----------
 
     private void handleLogin(Packet packet) throws IOException {
-        DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
-        String user = r.readUTF();
-        String hash = r.readUTF();
+        Messages.LoginRequest req = Messages.LoginRequest.decode(packet.getPayload());
+        String user = req.username();
+        String hash = req.passwordHash();
 
         String foundRole = db.authenticate(user, hash);
         if (foundRole == null) {
-            sendControl(PacketType.LOGIN_RES, PacketUtils.buildPayload(o -> {
-                o.writeByte(0);
-                o.writeUTF("Sai ten dang nhap hoac mat khau");
-                o.writeUTF("");
-            }));
+            sendControl(PacketType.LOGIN_RES,
+                    new Messages.LoginResponse(false, "Sai ten dang nhap hoac mat khau", "").encode());
             log("dang nhap that bai: " + user);
             return;
         }
 
         this.username = user;
         this.role = foundRole;
-        sendControl(PacketType.LOGIN_RES, PacketUtils.buildPayload(o -> {
-            o.writeByte(1);
-            o.writeUTF("Dang nhap thanh cong");
-            o.writeUTF(foundRole);
-        }));
+        sendControl(PacketType.LOGIN_RES,
+                new Messages.LoginResponse(true, "Dang nhap thanh cong", foundRole).encode());
         log("dang nhap thanh cong: " + user + " (" + foundRole + ")");
     }
 
     private void handleRegister(Packet packet) throws IOException {
-        DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
-        String user = r.readUTF();
-        String hash = r.readUTF();
-        String requestedRole = r.readUTF();
+        Messages.RegisterRequest req = Messages.RegisterRequest.decode(packet.getPayload());
+        String user = req.username();
+        String hash = req.passwordHash();
+        String requestedRole = req.role();
 
         // Không tin client: role phải là một trong hai giá trị hợp lệ.
         if (!Protocol.isValidRole(requestedRole)) {
-            sendControl(PacketType.REGISTER_RES, PacketUtils.buildPayload(o -> {
-                o.writeByte(0);
-                o.writeUTF("Vai tro khong hop le");
-            }));
+            sendControl(PacketType.REGISTER_RES,
+                    new Messages.StatusResponse(false, "Vai tro khong hop le").encode());
             return;
         }
 
         boolean ok = db.register(user, hash, requestedRole);
-        sendControl(PacketType.REGISTER_RES, PacketUtils.buildPayload(o -> {
-            o.writeByte(ok ? 1 : 0);
-            o.writeUTF(ok ? "Dang ky thanh cong" : "Ten dang nhap da ton tai");
-        }));
+        sendControl(PacketType.REGISTER_RES,
+                new Messages.StatusResponse(ok, ok ? "Dang ky thanh cong" : "Ten dang nhap da ton tai").encode());
         log("dang ky " + user + " (" + requestedRole + ") -> " + (ok ? "OK" : "trung ten"));
     }
 
@@ -352,14 +343,10 @@ public class ClientHandler implements Runnable {
         if (!requireLogin() || !requireTeacher()) {
             return;
         }
-        DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
-        String roomName = r.readUTF().trim();
+        String roomName = Messages.CreateRoomRequest.decode(packet.getPayload()).roomName().trim();
         if (roomName.isEmpty()) {
-            sendControl(PacketType.CREATE_ROOM_RES, PacketUtils.buildPayload(o -> {
-                o.writeByte(0);
-                o.writeUTF("Ten lop khong duoc de trong");
-                o.writeInt(-1);
-            }));
+            sendControl(PacketType.CREATE_ROOM_RES,
+                    new Messages.CreateRoomResponse(false, "Ten lop khong duoc de trong", -1).encode());
             return;
         }
 
@@ -367,11 +354,8 @@ public class ClientHandler implements Runnable {
         int newRoomId = db.createRoom(roomName, username);
         rooms.createRoom(newRoomId, roomName, username);
 
-        sendControl(PacketType.CREATE_ROOM_RES, PacketUtils.buildPayload(o -> {
-            o.writeByte(1);
-            o.writeUTF("Da tao lop " + roomName);
-            o.writeInt(newRoomId);
-        }));
+        sendControl(PacketType.CREATE_ROOM_RES,
+                new Messages.CreateRoomResponse(true, "Da tao lop " + roomName, newRoomId).encode());
         log("tao lop '" + roomName + "' ma " + newRoomId + " boi " + username);
     }
 
@@ -379,16 +363,14 @@ public class ClientHandler implements Runnable {
         if (!requireLogin()) {
             return;
         }
-        DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
-        int targetRoomId = r.readInt();
-        int clientUdpPort = r.readInt();
+        Messages.JoinRoomRequest req = Messages.JoinRoomRequest.decode(packet.getPayload());
+        int targetRoomId = req.roomId();
+        int clientUdpPort = req.udpPort();
 
         Room room = rooms.get(targetRoomId);
         if (room == null) {
-            sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
-                o.writeByte(0);
-                o.writeUTF("Lop khong ton tai hoac da dong");
-            }));
+            sendControl(PacketType.JOIN_ROOM_RES,
+                    new Messages.StatusResponse(false, "Lop khong ton tai hoac da dong").encode());
             return;
         }
 
@@ -400,10 +382,8 @@ public class ClientHandler implements Runnable {
         this.udpPort = clientUdpPort;
         room.addMember(this);
 
-        sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
-            o.writeByte(1);
-            o.writeUTF("Da vao lop " + room.getRoomName());
-        }));
+        sendControl(PacketType.JOIN_ROOM_RES,
+                new Messages.StatusResponse(true, "Da vao lop " + room.getRoomName()).encode());
         log("vao lop " + targetRoomId + " (" + username + "), cong UDP nhan thoai = " + clientUdpPort);
 
         // Gửi lại danh sách thành viên cho TẤT CẢ mọi người trong lớp (bước 2.2).
@@ -412,8 +392,7 @@ public class ClientHandler implements Runnable {
     }
 
     private void handleLeaveRoom(Packet packet) throws IOException {
-        DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
-        int targetRoomId = r.readInt();
+        int targetRoomId = Messages.RoomIdOnly.decode(packet.getPayload()).roomId();
         if (targetRoomId != roomId) {
             sendError("Ban khong o trong lop " + targetRoomId);
             return;
@@ -448,16 +427,12 @@ public class ClientHandler implements Runnable {
 
     private void handleRoomList() {
         List<RoomInfo> stored = db.listRooms();
-        sendControl(PacketType.ROOM_LIST_RES, PacketUtils.buildPayload(o -> {
-            o.writeInt(stored.size());
-            for (RoomInfo info : stored) {
-                o.writeInt(info.roomId());
-                o.writeUTF(info.roomName());
-                o.writeUTF(info.teacherUsername());
-                // Số người online lấy từ trạng thái RAM, không phải từ DB.
-                o.writeInt(rooms.memberCount(info.roomId()));
-            }
-        }));
+        List<RoomInfo> list = new ArrayList<>(stored.size());
+        for (RoomInfo info : stored) {
+            list.add(new RoomInfo(info.roomId(), info.roomName(), info.teacherUsername(),
+                    rooms.memberCount(info.roomId())));
+        }
+        sendControl(PacketType.ROOM_LIST_RES, new Messages.RoomList(list).encode());
     }
 
     private void handleChat(Packet packet) throws IOException {
@@ -467,6 +442,12 @@ public class ClientHandler implements Runnable {
         Room room = currentRoom();
         if (room == null) {
             sendError("Ban chua o trong lop nao");
+            return;
+        }
+        try {
+            Messages.ChatText.decode(packet.getPayload());
+        } catch (IOException e) {
+            sendError("Tin nhan khong hop le");
             return;
         }
         // Chuyển tiếp nguyên payload cho cả lớp, kể cả người gửi, để giao diện của họ
@@ -500,10 +481,8 @@ public class ClientHandler implements Runnable {
         }
 
         room.setSharing(true);
-        int n = room.broadcastControl(PacketType.SCREEN_START, PacketUtils.buildPayload(o -> {
-            o.writeInt(room.getRoomId());
-            o.writeUTF(room.getTeacherUsername());
-        }));
+        int n = room.broadcastControl(PacketType.SCREEN_START,
+                new Messages.ScreenNotice(room.getRoomId(), room.getTeacherUsername()).encode());
         log("bat dau chia se man hinh lop " + room.getRoomId() + " (thong bao " + n + " nguoi)");
     }
 
@@ -513,10 +492,8 @@ public class ClientHandler implements Runnable {
             return;
         }
         room.setSharing(false);
-        room.broadcastControl(PacketType.SCREEN_STOP, PacketUtils.buildPayload(o -> {
-            o.writeInt(room.getRoomId());
-            o.writeUTF("Giao vien da dung chia se man hinh");
-        }));
+        room.broadcastControl(PacketType.SCREEN_STOP,
+                new Messages.ScreenNotice(room.getRoomId(), "Giao vien da dung chia se man hinh").encode());
         log("dung chia se man hinh lop " + room.getRoomId());
     }
 

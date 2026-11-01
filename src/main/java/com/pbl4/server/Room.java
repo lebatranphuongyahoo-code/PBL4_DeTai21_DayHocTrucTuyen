@@ -1,7 +1,7 @@
 package com.pbl4.server;
 
 import com.pbl4.common.PacketType;
-import com.pbl4.common.PacketUtils;
+import com.pbl4.common.msg.Messages;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -145,19 +145,13 @@ public class Room {
      */
     public byte[] buildUserListPayload() {
         List<ClientHandler> targets = snapshotMembers();
-        List<ClientHandler> loggedIn = new ArrayList<>();
+        List<Messages.Member> loggedIn = new ArrayList<>();
         for (ClientHandler c : targets) {
             if (c.getUsername() != null) {
-                loggedIn.add(c);
+                loggedIn.add(new Messages.Member(c.getUsername(), c.getRole()));
             }
         }
-        return PacketUtils.buildPayload(out -> {
-            out.writeInt(loggedIn.size());
-            for (ClientHandler c : loggedIn) {
-                out.writeUTF(c.getUsername());
-                out.writeUTF(c.getRole() == null ? "" : c.getRole());
-            }
-        });
+        return new Messages.UserList(loggedIn).encode();
     }
 
     /** Gửi lại danh sách thành viên cho cả lớp — gọi sau mỗi lần có người vào hoặc ra (bước 2.2). */
