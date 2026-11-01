@@ -13,7 +13,7 @@ import com.pbl4.common.msg.Messages;
 import com.pbl4.server.RoomManager;
 import com.pbl4.server.ServerConfig;
 import com.pbl4.server.ServerMain;
-import com.pbl4.server.db.DatabaseManager;
+import com.pbl4.server.db.SqliteDatabaseManager;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -62,7 +62,7 @@ public class TV2Chang2Test {
         System.out.println("########################################################");
 
         RoomManager rooms = new RoomManager();
-        server = new ServerMain(ServerConfig.ephemeral(), rooms, new DatabaseManager(":memory:"));
+        server = new ServerMain(ServerConfig.ephemeral(), rooms, new SqliteDatabaseManager(":memory:"));
         Thread serverThread = new Thread(server::start, "server-main");
         serverThread.setDaemon(true);
         serverThread.start();

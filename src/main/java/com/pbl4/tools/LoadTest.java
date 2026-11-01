@@ -5,6 +5,7 @@ import com.pbl4.server.RoomManager;
 import com.pbl4.server.ServerConfig;
 import com.pbl4.server.ServerMain;
 import com.pbl4.server.db.DatabaseManager;
+import com.pbl4.server.db.SqliteDatabaseManager;
 
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
@@ -68,7 +69,7 @@ public class LoadTest {
         System.out.println("########################################################");
 
         RoomManager rooms = new RoomManager();
-        DatabaseManager db = new DatabaseManager(config.dbPath());
+        DatabaseManager db = new SqliteDatabaseManager(config.dbPath());
         ServerMain server = new ServerMain(config, rooms, db);
         Thread serverThread = new Thread(server::start, "server-main");
         serverThread.setDaemon(true);

@@ -162,20 +162,9 @@ socket → nghe như mất tiếng. Đã sửa trong `a4d9580`:
 - Tắt mic **chỉ** dừng `AudioRecorder`, không dừng `AudioPlayer`.
 - `AUDIO_ON` lấy cổng từ `audioSocket.getLocalPort()` thay vì `audioPlayer.start()`.
 
-### 3.1 Hợp đồng đã đổi: `DatabaseManager` không còn là interface
+### 3.1 Đã quay về thiết kế 1.5.5: `DatabaseManager` là interface
 
-`DatabaseManager` giờ là **lớp cụ thể** bọc SQLite: `new DatabaseManager("pbl4.db")`.
-`InMemoryDatabaseManager` đổi thành `extends DatabaseManager` và gọi `super(":memory:")`.
-`ServerMain.main()` gọi thẳng bản SQLite.
-
-Hệ quả cần nắm khi bảo vệ:
-
-- **Không còn "đổi một dòng"** như thiết kế ban đầu — CSDL đã gắn cứng trong `ServerMain`.
-- **Không có file `SqliteDatabaseManager`** như bảng 1.5.5 mô tả; chức năng nằm ngay trong
-  `DatabaseManager`. Nhóm cần xác nhận cách đặt tên này trước khi in báo cáo.
-- Muốn quay lại bản tạm trong RAM: sửa `ServerMain.main()` thành
-  `DatabaseManager db = new InMemoryDatabaseManager();` — vẫn biên dịch được vì lớp này kế thừa
-  `DatabaseManager`.
+Đã quay về thiết kế 1.5.5: `DatabaseManager` là interface, `SqliteDatabaseManager` là bản cài đặt; `InMemoryDatabaseManager` đã xoá, test dùng SQLite `:memory:`.
 
 ---
 

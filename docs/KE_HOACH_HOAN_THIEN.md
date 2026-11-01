@@ -202,8 +202,10 @@ minh đúng câu đó; #3, #5 thì không.
 
 Ba điều này **nên** được ghi trong báo cáo, vì hội đồng sẽ tự thấy nếu mình không nói:
 
-1. **`DatabaseManager` không còn là interface** như thiết kế ban đầu — CSDL gắn cứng trong
-   `ServerMain`. Đã ghi ở `README.md` 3.1.
+1. ~~**`DatabaseManager` không còn là interface** như thiết kế ban đầu — CSDL gắn cứng trong
+   `ServerMain`. Đã ghi ở `README.md` 3.1.~~ → **Đã khắc phục** trong commit
+   `refactor(db): DatabaseManager thanh interface, SqliteDatabaseManager, xoa InMemory [TV1 sua file cua TV3]`
+   (đã tách lại interface `DatabaseManager` và lớp `SqliteDatabaseManager` đúng bảng 1.5.5, xoá `InMemoryDatabaseManager`, test dùng SQLite `:memory:`).
 2. **Không có xác thực phiên** — sau `LOGIN_RES`, server tin client là ai mãi mãi; mất kết nối
    thì phải đăng nhập lại.
 3. **Chưa mã hoá** — mật khẩu băm SHA-256 phía client, nhưng đường truyền là plaintext.

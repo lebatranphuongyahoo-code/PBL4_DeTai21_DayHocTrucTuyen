@@ -2,6 +2,7 @@ package com.pbl4.server;
 
 import com.pbl4.common.Protocol;
 import com.pbl4.server.db.DatabaseManager;
+import com.pbl4.server.db.SqliteDatabaseManager;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -68,7 +69,7 @@ public class ServerMain {
         java.util.Locale.setDefault(java.util.Locale.US);
 
         ServerConfig config = ServerConfig.fromArgs(args);
-        DatabaseManager db = new DatabaseManager(config.dbPath());
+        DatabaseManager db = new SqliteDatabaseManager(config.dbPath());
         RoomManager rooms = new RoomManager();
         ServerMain server = new ServerMain(config, rooms, db);
 

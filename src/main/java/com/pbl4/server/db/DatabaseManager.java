@@ -1,169 +1,33 @@
 package com.pbl4.server.db;
 
-import com.pbl4.common.Protocol;
 import com.pbl4.common.RoomInfo;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
-import java.util.concurrent.ThreadLocalRandom;
+import java.util.Optional;
 
 /**
- * SQLite-backed user and room storage.
+ * Hợp đồng lưu trữ tài khoản và lớp học (bảng 1.5.5). Server chỉ biết interface này,
+ * nên đổi nơi lưu (SQLite, RAM, MySQL…) không phải sửa tầng server.
  *
- * <p>Values must be bound through {@link PreparedStatement}, not concatenated into SQL:
- * concatenating user input can change the meaning of a query (SQL injection), while
- * prepared statements send values separately from the SQL syntax.</p>
+ * <p>Mọi phương thức phải an toàn khi nhiều luồng của thread pool gọi cùng lúc.</p>
  */
-public class DatabaseManager implements AutoCloseable {
+public interface DatabaseManager extends AutoCloseable {
 
-    private static final int SQLITE_CONSTRAINT = 19;
-    private static final int ROOM_ID_ATTEMPTS = 100;
+    /** @return {@code false} chỉ khi tên đăng nhập đã tồn tại */
+    boolean register(String user, String sha256Hex, String role);
 
-    private final Connection connection;
+    /** @return vai trò nếu đúng tên và mật khẩu, ngược lại {@code null} */
+    String authenticate(String user, String sha256Hex);
 
-    /**
-     * Opens the SQLite database at {@code dbPath} and creates its tables if needed.
-     *
-     * @param dbPath path to the database file; use {@code :memory:} for an in-memory database
-     * @throws IllegalStateException if the database cannot be opened or initialized
-     */
-    public DatabaseManager(String dbPath) {
-        Objects.requireNonNull(dbPath, "dbPath");
-        Connection opened = null;
-        try {
-            opened = DriverManager.getConnection("jdbc:sqlite:" + dbPath);
-            try (PreparedStatement statement = opened.prepareStatement("PRAGMA foreign_keys = ON")) {
-                statement.execute();
-            }
-            try (PreparedStatement statement = opened.prepareStatement(
-                    """
-                    CREATE TABLE IF NOT EXISTS Users (
-                        username TEXT PRIMARY KEY,
-                        password_hash TEXT NOT NULL,
-                        role TEXT NOT NULL
-                    )
-                    """)) {
-                statement.executeUpdate();
-            }
-            try (PreparedStatement statement = opened.prepareStatement(
-                    """
-                    CREATE TABLE IF NOT EXISTS Rooms (
-                        room_id INTEGER PRIMARY KEY,
-                        name TEXT NOT NULL,
-                        teacher_user TEXT NOT NULL,
-                        FOREIGN KEY (teacher_user) REFERENCES Users(username)
-                    )
-                    """)) {
-                statement.executeUpdate();
-            }
-            connection = opened;
-        } catch (SQLException e) {
-            if (opened != null) {
-                try {
-                    opened.close();
-                } catch (SQLException closeException) {
-                    e.addSuppressed(closeException);
-                }
-            }
-            throw new IllegalStateException("Cannot initialize SQLite database: " + dbPath, e);
-        }
-    }
+    /** Tạo lớp với mã 6 chữ số chưa dùng, trả về mã đó. */
+    int createRoom(String name, String teacherUser);
 
-    /**
-     * Registers a user.
-     *
-     * @return {@code false} only when the username already exists
-     */
-    public synchronized boolean register(String user, String sha256Hex, String role) {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO Users (username, password_hash, role) VALUES (?, ?, ?)")) {
-            statement.setString(1, user);
-            statement.setString(2, sha256Hex);
-            statement.setString(3, role);
-            statement.executeUpdate();
-            return true;
-        } catch (SQLException e) {
-            if (isConstraintOn(e, "Users.username")) {
-                return false;
-            }
-            throw new IllegalStateException("Cannot register user", e);
-        }
-    }
+    /** Mọi lớp đã lưu; {@code memberCount} luôn là 0 (số online nằm trong RAM). */
+    List<RoomInfo> listRooms();
 
-    /** Returns the stored role when both credentials match, or {@code null} otherwise. */
-    public synchronized String authenticate(String user, String sha256Hex) {
-        try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT role FROM Users WHERE username = ? AND password_hash = ?")) {
-            statement.setString(1, user);
-            statement.setString(2, sha256Hex);
-            try (ResultSet result = statement.executeQuery()) {
-                return result.next() ? result.getString("role") : null;
-            }
-        } catch (SQLException e) {
-            throw new IllegalStateException("Cannot authenticate user", e);
-        }
-    }
-
-    /** Creates a room with a unique six-digit ID and returns that ID. */
-    public synchronized int createRoom(String name, String teacherUser) {
-        for (int attempt = 0; attempt < ROOM_ID_ATTEMPTS; attempt++) {
-            int roomId = ThreadLocalRandom.current()
-                    .nextInt(Protocol.ROOM_ID_MIN, Protocol.ROOM_ID_MAX + 1);
-            try (PreparedStatement statement = connection.prepareStatement(
-                    "INSERT INTO Rooms (room_id, name, teacher_user) VALUES (?, ?, ?)")) {
-                statement.setInt(1, roomId);
-                statement.setString(2, name);
-                statement.setString(3, teacherUser);
-                statement.executeUpdate();
-                return roomId;
-            } catch (SQLException e) {
-                if (isConstraintOn(e, "Rooms.room_id")) {
-                    continue;
-                }
-                throw new IllegalStateException("Cannot create room", e);
-            }
-        }
-        throw new IllegalStateException("Cannot allocate a unique room ID after "
-                + ROOM_ID_ATTEMPTS + " attempts");
-    }
-
-    /** Returns saved rooms; {@code memberCount} is zero because online state is kept in memory. */
-    public synchronized List<RoomInfo> listRooms() {
-        List<RoomInfo> rooms = new ArrayList<>();
-        try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT room_id, name, teacher_user FROM Rooms ORDER BY room_id");
-             ResultSet result = statement.executeQuery()) {
-            while (result.next()) {
-                rooms.add(new RoomInfo(
-                        result.getInt("room_id"),
-                        result.getString("name"),
-                        result.getString("teacher_user"),
-                        0));
-            }
-            return rooms;
-        } catch (SQLException e) {
-            throw new IllegalStateException("Cannot list rooms", e);
-        }
-    }
+    /** Lớp có mã {@code roomId}, hoặc rỗng nếu không có. {@code memberCount} = 0. */
+    Optional<RoomInfo> findRoom(int roomId);
 
     @Override
-    public synchronized void close() {
-        try {
-            connection.close();
-        } catch (SQLException e) {
-            throw new IllegalStateException("Cannot close SQLite database", e);
-        }
-    }
-
-    private static boolean isConstraintOn(SQLException exception, String column) {
-        return (exception.getErrorCode() & 0xFF) == SQLITE_CONSTRAINT
-                && exception.getMessage() != null
-                && exception.getMessage().contains(column);
-    }
+    void close();
 }
