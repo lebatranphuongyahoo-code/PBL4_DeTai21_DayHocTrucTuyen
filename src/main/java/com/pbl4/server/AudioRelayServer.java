@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *   <li>Kiểm tra độ dài gói (phải đúng {@value Protocol#UDP_PACKET_BYTES} byte).</li>
  *   <li>Đọc 4 byte đầu thành {@code roomId}.</li>
  *   <li>Tra lớp, <b>sao chép</b> danh sách thành viên ra mảng tạm rồi <b>nhả khoá</b>.</li>
+ *   <li>Kiểm tra người gửi là thành viên trong lớp và đang bật mic.</li>
  *   <li>Gửi <b>nguyên gói</b> cho từng thành viên, <b>trừ người vừa gửi</b>.</li>
  * </ol>
  *
@@ -49,6 +50,7 @@ public class AudioRelayServer implements Runnable {
     private final AtomicLong bytesRelayed = new AtomicLong();
     private final AtomicLong packetsMalformed = new AtomicLong();
     private final AtomicLong packetsUnknownRoom = new AtomicLong();
+    private final AtomicLong packetsRejected = new AtomicLong();
 
     private long startMillis;
     private long lastStatMillis;
@@ -125,6 +127,18 @@ public class AudioRelayServer implements Runnable {
         InetAddress sourceAddress = incoming.getAddress();
         int sourcePort = incoming.getPort();
 
+        ClientHandler sender = null;
+        for (ClientHandler member : targets) {
+            if (member.isSameUdpSource(sourceAddress, sourcePort)) {
+                sender = member;
+                break;
+            }
+        }
+        if (sender == null || !sender.isMicOn()) {
+            packetsRejected.incrementAndGet();
+            return;
+        }
+
         int sentTo = 0;
         for (ClientHandler member : targets) {
             if (!member.hasUdpAddress()) {
@@ -193,6 +207,10 @@ public class AudioRelayServer implements Runnable {
 
     public long getPacketsUnknownRoom() {
         return packetsUnknownRoom.get();
+    }
+
+    public long getPacketsRejected() {
+        return packetsRejected.get();
     }
 
     /** Tỉ lệ gói đã chuyển tiếp trên số gói nhận được — dùng cho bảng đo ở Chương 3. */

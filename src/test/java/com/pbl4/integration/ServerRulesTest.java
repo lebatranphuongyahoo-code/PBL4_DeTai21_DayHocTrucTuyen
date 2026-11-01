@@ -10,6 +10,11 @@ import com.pbl4.server.ServerMain;
 import com.pbl4.server.db.DatabaseManager;
 import com.pbl4.server.db.SqliteDatabaseManager;
 import com.pbl4.tools.TestClient.Conn;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.SocketTimeoutException;
+import java.nio.ByteBuffer;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -22,6 +27,7 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServerRulesTest {
@@ -252,5 +258,65 @@ class ServerRulesTest {
         gv.send(PacketType.CHAT_TEXT, new Messages.ChatText(id + 1, "alo").encode());
         Packet err = gv.await(PacketType.ERROR, 2000);
         assertNotNull(err);
+    }
+
+    // ==================================================================
+    // B6 — Relay UDP chỉ nhận từ thành viên đang bật mic
+    // ==================================================================
+
+    @Test
+    @Timeout(20)
+    void udpFromNonMemberIsNotRelayed() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B6");
+
+        Conn hs = client("hs1", Protocol.ROLE_STUDENT);
+        hs.openAudioSocket();
+        assertTrue(hs.join(id, hs.audioSocket.getLocalPort()));
+        assertNotNull(hs.await(PacketType.USER_LIST, 2000));
+
+        byte[] pkt = new byte[Protocol.UDP_PACKET_BYTES];
+        ByteBuffer.wrap(pkt).putInt(0, id).putInt(4, 1);
+        InetAddress localhost = InetAddress.getByName("127.0.0.1");
+
+        try (DatagramSocket stranger = new DatagramSocket()) {
+            for (int i = 0; i < 20; i++) {
+                stranger.send(new DatagramPacket(pkt, pkt.length, localhost, server.getUdpPort()));
+            }
+        }
+
+        hs.audioSocket.setSoTimeout(1000);
+        byte[] recv = new byte[Protocol.UDP_PACKET_BYTES];
+        assertThrows(SocketTimeoutException.class,
+                () -> hs.audioSocket.receive(new DatagramPacket(recv, recv.length)));
+        assertTrue(server.getAudioRelay().getPacketsRejected() >= 20);
+    }
+
+    @Test
+    @Timeout(20)
+    void udpFromMemberWithoutMicIsNotRelayed() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B6");
+        gv.openAudioSocket();
+        assertTrue(gv.join(id, gv.audioSocket.getLocalPort()));
+
+        Conn hs = client("hs1", Protocol.ROLE_STUDENT);
+        hs.openAudioSocket();
+        assertTrue(hs.join(id, hs.audioSocket.getLocalPort()));
+        assertNotNull(hs.await(PacketType.USER_LIST, 2000));
+
+        // gv KHÔNG gửi AUDIO_ON nhưng gửi UDP thẳng từ đúng audioSocket đã đăng ký
+        byte[] pkt = new byte[Protocol.UDP_PACKET_BYTES];
+        ByteBuffer.wrap(pkt).putInt(0, id).putInt(4, 1);
+        InetAddress localhost = InetAddress.getByName("127.0.0.1");
+        for (int i = 0; i < 10; i++) {
+            gv.audioSocket.send(new DatagramPacket(pkt, pkt.length, localhost, server.getUdpPort()));
+        }
+
+        hs.audioSocket.setSoTimeout(1000);
+        byte[] recv = new byte[Protocol.UDP_PACKET_BYTES];
+        assertThrows(SocketTimeoutException.class,
+                () -> hs.audioSocket.receive(new DatagramPacket(recv, recv.length)));
+        assertTrue(server.getAudioRelay().getPacketsRejected() >= 10);
     }
 }
