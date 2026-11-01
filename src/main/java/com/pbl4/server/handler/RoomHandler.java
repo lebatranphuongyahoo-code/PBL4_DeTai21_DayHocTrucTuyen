@@ -30,10 +30,10 @@ public final class RoomHandler {
         if (!requireLogin(c) || !requireTeacher(c)) {
             return;
         }
-        String roomName = Messages.CreateRoomRequest.decode(packet.getPayload()).roomName().trim();
-        if (roomName.isEmpty()) {
+        String roomName = Messages.CreateRoomRequest.decode(packet.getPayload()).roomName().strip();
+        if (roomName.isEmpty() || roomName.length() > 100) {
             c.sendControl(PacketType.CREATE_ROOM_RES,
-                    new Messages.CreateRoomResponse(false, "Ten lop khong duoc de trong", -1).encode());
+                    new Messages.CreateRoomResponse(false, "Ten lop phai tu 1 den 100 ky tu", -1).encode());
             return;
         }
 
@@ -91,6 +91,9 @@ public final class RoomHandler {
     }
 
     public void handleLeaveRoom(ClientHandler c, Packet packet) throws IOException {
+        if (!requireLogin(c)) {
+            return;
+        }
         int targetRoomId = Messages.RoomIdOnly.decode(packet.getPayload()).roomId();
         if (targetRoomId != c.getRoomId()) {
             c.sendError("Ban khong o trong lop " + targetRoomId);

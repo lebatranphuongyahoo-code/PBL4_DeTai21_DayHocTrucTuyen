@@ -14,6 +14,9 @@ public final class AudioHandler {
     }
 
     public void handleAudioOn(ClientHandler c) {
+        if (!requireLogin(c)) {
+            return;
+        }
         Room room = currentRoom(c);
         if (room == null) {
             c.sendError("Ban chua o trong lop nao");
@@ -29,6 +32,9 @@ public final class AudioHandler {
     }
 
     public void handleAudioOff(ClientHandler c) {
+        if (!requireLogin(c)) {
+            return;
+        }
         c.setMicOn(false);
         c.log("tat mic: " + c.getUsername());
     }
@@ -36,5 +42,13 @@ public final class AudioHandler {
     private Room currentRoom(ClientHandler c) {
         int current = c.getRoomId();
         return (current < 0) ? null : rooms.get(current);
+    }
+
+    private static boolean requireLogin(ClientHandler c) {
+        if (!c.isLoggedIn()) {
+            c.sendError("Ban chua dang nhap");
+            return false;
+        }
+        return true;
     }
 }

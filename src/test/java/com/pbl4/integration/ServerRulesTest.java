@@ -319,4 +319,61 @@ class ServerRulesTest {
                 () -> hs.audioSocket.receive(new DatagramPacket(recv, recv.length)));
         assertTrue(server.getAudioRelay().getPacketsRejected() >= 10);
     }
+
+    // ==================================================================
+    // B7 — Kiểm tra đầu vào đăng ký/tạo lớp, requireLogin đầy đủ
+    // ==================================================================
+
+    @Test
+    @Timeout(20)
+    void registerRejectsBadUsername() throws Exception {
+        String validHash = "a".repeat(64);
+        String[] badNames = {"a", "co dau cach", "x".repeat(33)};
+        for (String bad : badNames) {
+            Conn c = new Conn("127.0.0.1", server.getTcpPort(), server.getUdpPort());
+            conns.add(c);
+            c.send(PacketType.REGISTER_REQ,
+                    new Messages.RegisterRequest(bad, validHash, Protocol.ROLE_STUDENT).encode());
+            Packet res = c.await(PacketType.REGISTER_RES, 2000);
+            assertNotNull(res, "Phai nhan REGISTER_RES cho ten: " + bad);
+            assertFalse(Messages.StatusResponse.decode(res.getPayload()).ok(),
+                    "Ten xau phai bi tu choi: " + bad);
+        }
+    }
+
+    @Test
+    @Timeout(20)
+    void registerRejectsBadHash() throws Exception {
+        Conn c = new Conn("127.0.0.1", server.getTcpPort(), server.getUdpPort());
+        conns.add(c);
+        c.send(PacketType.REGISTER_REQ,
+                new Messages.RegisterRequest("valid_user", "abc", Protocol.ROLE_STUDENT).encode());
+        Packet res = c.await(PacketType.REGISTER_RES, 2000);
+        assertNotNull(res);
+        assertFalse(Messages.StatusResponse.decode(res.getPayload()).ok());
+    }
+
+    @Test
+    @Timeout(20)
+    void createRoomRejectsLongName() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        gv.send(PacketType.CREATE_ROOM_REQ,
+                new Messages.CreateRoomRequest("A".repeat(101)).encode());
+        Packet res = gv.await(PacketType.CREATE_ROOM_RES, 2000);
+        assertNotNull(res);
+        Messages.CreateRoomResponse decoded = Messages.CreateRoomResponse.decode(res.getPayload());
+        assertFalse(decoded.ok());
+        assertEquals(-1, decoded.roomId());
+    }
+
+    @Test
+    @Timeout(20)
+    void leaveWithoutLoginGetsError() throws Exception {
+        Conn raw = new Conn("127.0.0.1", server.getTcpPort(), server.getUdpPort());
+        conns.add(raw);
+        raw.send(PacketType.LEAVE_ROOM_REQ, new Messages.RoomIdOnly(-1).encode());
+        Packet err = raw.await(PacketType.ERROR, 2000);
+        assertNotNull(err);
+        assertEquals("Ban chua dang nhap", Messages.ErrorMessage.decode(err.getPayload()).message());
+    }
 }

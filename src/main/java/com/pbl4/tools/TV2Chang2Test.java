@@ -95,7 +95,7 @@ public class TV2Chang2Test {
         // lỗi "chua dang nhap" cho JOIN_ROOM_REQ, lớp chỉ có 1 người, và kênh thoại
         // relay được nhưng danh sách người nhận RỖNG -> tưởng là lỗi mạng.
         check("giao vien dang ky + dang nhap",
-                login(teacher, "gv-hoang", Protocol.ROLE_TEACHER));
+                login(teacher, "gv_hoang", Protocol.ROLE_TEACHER));
         teacher.send(PacketType.CREATE_ROOM_REQ,
                 new Messages.CreateRoomRequest("Lop TV2 test").encode());
         Packet created = teacher.await(PacketType.CREATE_ROOM_RES, 3000);
@@ -105,7 +105,7 @@ public class TV2Chang2Test {
         check("tao lop duoc, ma lop = " + roomId, roomId > 0);
 
         check("hoc sinh dang ky + dang nhap",
-                login(student, "hs-hoang", Protocol.ROLE_STUDENT));
+                login(student, "hs_hoang", Protocol.ROLE_STUDENT));
 
         // MỖI client mở ĐÚNG MỘT DatagramSocket dùng chung cho cả gửi và nhận.
         DatagramSocket teacherAudio = new DatagramSocket();

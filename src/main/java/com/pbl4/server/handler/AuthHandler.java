@@ -8,9 +8,13 @@ import com.pbl4.server.ClientHandler;
 import com.pbl4.server.db.DatabaseManager;
 
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 /** Xử lý đăng nhập ({@code LOGIN_REQ}) và đăng ký ({@code REGISTER_REQ}). */
 public final class AuthHandler {
+
+    private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_.]{2,32}");
+    private static final Pattern SHA256_HEX = Pattern.compile("[0-9a-f]{64}");
 
     private final DatabaseManager db;
 
@@ -47,6 +51,16 @@ public final class AuthHandler {
         if (!Protocol.isValidRole(requestedRole)) {
             c.sendControl(PacketType.REGISTER_RES,
                     new Messages.StatusResponse(false, "Vai tro khong hop le").encode());
+            return;
+        }
+        if (user == null || !USERNAME.matcher(user).matches()) {
+            c.sendControl(PacketType.REGISTER_RES,
+                    new Messages.StatusResponse(false, "Ten dang nhap 2-32 ky tu: chu, so, _ hoac .").encode());
+            return;
+        }
+        if (hash == null || !SHA256_HEX.matcher(hash).matches()) {
+            c.sendControl(PacketType.REGISTER_RES,
+                    new Messages.StatusResponse(false, "Mat khau khong hop le").encode());
             return;
         }
 

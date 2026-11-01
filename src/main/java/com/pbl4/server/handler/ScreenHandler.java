@@ -69,6 +69,9 @@ public final class ScreenHandler {
      * sẽ bị bỏ qua hoàn toàn.</p>
      */
     public void handleScreenFrame(ClientHandler c, Packet packet) {
+        if (!c.isLoggedIn()) {
+            return;
+        }
         Room room = currentRoom(c);
         if (room == null || !room.isSharing()) {
             return;   // bỏ qua, không relay
