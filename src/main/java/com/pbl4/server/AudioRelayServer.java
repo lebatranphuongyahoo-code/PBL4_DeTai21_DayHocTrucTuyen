@@ -55,11 +55,15 @@ public class AudioRelayServer implements Runnable {
     private int sinceLastStat;
     private int lastReceiverCount;
 
-    public AudioRelayServer(RoomManager rooms) throws SocketException {
+    public AudioRelayServer(RoomManager rooms, int udpPort) throws SocketException {
         this.rooms = rooms;
-        this.socket = new DatagramSocket(Protocol.UDP_PORT);
+        this.socket = new DatagramSocket(udpPort);
         // Đệm nhận lớn hơn một chút để không mất gói khi có nhiều phòng cùng lúc.
         this.socket.setReceiveBufferSize(1 << 20);
+    }
+
+    public int getLocalPort() {
+        return socket.getLocalPort();
     }
 
     public void start() {
@@ -74,7 +78,7 @@ public class AudioRelayServer implements Runnable {
         lastStatMillis = startMillis;
         byte[] buffer = new byte[Protocol.UDP_RECV_BUFFER_BYTES];
 
-        System.out.println("[audio] Relay thoai dang lang nghe tren cong UDP " + Protocol.UDP_PORT);
+        System.out.println("[audio] Relay thoai dang lang nghe tren cong UDP " + getLocalPort());
 
         while (running) {
             try {

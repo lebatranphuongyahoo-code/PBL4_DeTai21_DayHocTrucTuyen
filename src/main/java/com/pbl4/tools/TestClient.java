@@ -54,17 +54,14 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class TestClient {
 
-    private static String host = "127.0.0.1";
-    private static int port = Protocol.TCP_PORT;
-
     public static void main(String[] args) throws Exception {
         java.util.Locale.setDefault(java.util.Locale.US);   // so lieu in ra dung dau cham
         if (args.length < 3) {
             usage();
             return;
         }
-        host = args[0];
-        port = Integer.parseInt(args[1]);
+        String host = args[0];
+        int port = Integer.parseInt(args[1]);
 
         String asSpec = null;
         int cmdIdx = 2;
@@ -83,7 +80,7 @@ public class TestClient {
         boolean needRaw = command.equals("screen-recv") && a.length > 2
                 && Integer.parseInt(a[2]) > 0;
 
-        try (Conn conn = new Conn(!needRaw)) {
+        try (Conn conn = new Conn(host, port, Protocol.UDP_PORT, !needRaw)) {
             autoLoginIfNeeded(conn, command, asSpec);
             switch (command) {
                 case "hold" -> cmdHold(conn, a);
@@ -149,51 +146,19 @@ public class TestClient {
     }
 
     private static void ensureLogin(Conn conn, String user, String pass, String role) throws Exception {
-        String hash = Sha256.hex(pass);
-
-        conn.send(PacketType.REGISTER_REQ, PacketUtils.buildPayload(o -> {
-            o.writeUTF(user);
-            o.writeUTF(hash);
-            o.writeUTF(role);
-        }));
-        conn.await(PacketType.REGISTER_RES, 3000); // bo qua ket qua trung ten
-
-        conn.send(PacketType.LOGIN_REQ, PacketUtils.buildPayload(o -> {
-            o.writeUTF(user);
-            o.writeUTF(hash);
-        }));
-        Packet login = conn.await(PacketType.LOGIN_RES, 3000);
-        if (login == null) {
-            System.out.println("[test] dang nhap that bai: khong phan hoi");
+        try {
+            conn.registerAndLogin(user, pass, role);
+            System.out.println("[test] dang nhap: " + user + " (" + role + ")");
+        } catch (IllegalStateException e) {
+            System.out.println("[test] dang nhap that bai: " + e.getMessage());
             System.exit(1);
         }
-        DataInputStream r = PacketUtils.payloadReader(login.getPayload());
-        int ok = r.readByte();
-        String msg = r.readUTF();
-        String actualRole = r.available() > 0 ? r.readUTF() : role;
-        if (ok == 0) {
-            System.out.println("[test] dang nhap that bai: " + msg);
-            System.exit(1);
-        }
-        System.out.println("[test] dang nhap: " + user + " (" + actualRole + ")");
     }
 
     /** Gửi JOIN_ROOM_REQ và kiểm tra ok=1; nếu thất bại thì in lý do và thoát mã 1. */
     private static void ensureJoinRoom(Conn conn, int roomId, int udpPort) throws Exception {
-        conn.send(PacketType.JOIN_ROOM_REQ, PacketUtils.buildPayload(o -> {
-            o.writeInt(roomId);
-            o.writeInt(udpPort);
-        }));
-        Packet res = conn.await(PacketType.JOIN_ROOM_RES, 3000);
-        if (res == null) {
-            System.out.println("[test] vao lop that bai: khong nhan duoc JOIN_ROOM_RES");
-            System.exit(1);
-        }
-        DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-        int ok = r.readByte();
-        String msg = r.readUTF();
-        if (ok == 0) {
-            System.out.println("[test] vao lop that bai: " + msg);
+        if (!conn.join(roomId, udpPort)) {
+            System.out.println("[test] vao lop that bai: roomId=" + roomId);
             System.exit(1);
         }
     }
@@ -313,21 +278,12 @@ public class TestClient {
     private static void cmdScreenSend(Conn conn, String[] a) throws Exception {
         int roomId;
         if ("new".equalsIgnoreCase(a[0])) {
-            conn.send(PacketType.CREATE_ROOM_REQ,
-                    PacketUtils.buildPayload(o -> o.writeUTF("Thi nghiem 4.2")));
-            Packet createRes = conn.await(PacketType.CREATE_ROOM_RES, 3000);
-            if (createRes == null) {
-                System.out.println("[test] khong nhan duoc CREATE_ROOM_RES");
+            try {
+                roomId = conn.createRoom("Thi nghiem 4.2");
+            } catch (IllegalStateException e) {
+                System.out.println("[test] tao lop that bai: " + e.getMessage());
                 System.exit(1);
                 return;
-            }
-            DataInputStream cr = PacketUtils.payloadReader(createRes.getPayload());
-            int ok = cr.readByte();
-            String msg = cr.readUTF();
-            roomId = cr.readInt();
-            if (ok == 0) {
-                System.out.println("[test] tao lop that bai: " + msg);
-                System.exit(1);
             }
             System.out.println("ROOM_ID=" + roomId);
         } else {
@@ -449,7 +405,7 @@ public class TestClient {
 
         byte[] packet = new byte[Protocol.UDP_PACKET_BYTES];
         writeInt(packet, Protocol.UDP_OFFSET_ROOM_ID, roomId);
-        InetAddress server = InetAddress.getByName(host);
+        InetAddress server = InetAddress.getByName(conn.host);
         int total = seconds * 50;
         long t0 = System.nanoTime();
         for (int seq = 0; seq < total; seq++) {
@@ -458,7 +414,7 @@ public class TestClient {
             for (int i = 0; i < Protocol.UDP_PCM_BYTES; i++) {
                 packet[Protocol.UDP_OFFSET_PCM + i] = (byte) (seq + i);
             }
-            conn.audioSocket.send(new DatagramPacket(packet, packet.length, server, Protocol.UDP_PORT));
+            conn.audioSocket.send(new DatagramPacket(packet, packet.length, server, conn.udpPort));
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
             long targetMs = (seq + 1) * 20L;
             if (targetMs > elapsedMs) {
@@ -548,24 +504,30 @@ public class TestClient {
      *       và thí nghiệm drop-oldest sẽ không chứng minh được gì.</li>
      * </ul>
      */
-    static class Conn implements Closeable {
+    public static class Conn implements Closeable {
 
-        final Socket socket;
-        final DataInputStream in;
-        final DataOutputStream out;
-        final BlockingQueue<Packet> inbox = new LinkedBlockingQueue<>();
-        final AtomicBoolean open = new AtomicBoolean(true);
-        final AtomicInteger framesReceived = new AtomicInteger();
+        public final String host;
+        public final int tcpPort;
+        public final int udpPort;
+        public final Socket socket;
+        public final DataInputStream in;
+        public final DataOutputStream out;
+        public final BlockingQueue<Packet> inbox = new LinkedBlockingQueue<>();
+        public final AtomicBoolean open = new AtomicBoolean(true);
+        public final AtomicInteger framesReceived = new AtomicInteger();
         private final boolean autoRead;
-        DatagramSocket audioSocket;
+        public DatagramSocket audioSocket;
 
-        Conn() throws IOException {
-            this(true);
+        public Conn(String host, int tcpPort, int udpPort) throws IOException {
+            this(host, tcpPort, udpPort, true);
         }
 
-        Conn(boolean autoRead) throws IOException {
+        public Conn(String host, int tcpPort, int udpPort, boolean autoRead) throws IOException {
+            this.host = host;
+            this.tcpPort = tcpPort;
+            this.udpPort = udpPort;
             this.autoRead = autoRead;
-            socket = new Socket(host, port);
+            socket = new Socket(host, tcpPort);
             socket.setTcpNoDelay(true);
             in = new DataInputStream(new BufferedInputStream(socket.getInputStream()));
             out = new DataOutputStream(new BufferedOutputStream(socket.getOutputStream()));
@@ -576,6 +538,65 @@ public class TestClient {
             }
         }
 
+        /** REGISTER (bỏ qua trùng tên) rồi LOGIN. Ném IllegalStateException nếu đăng nhập thất bại. */
+        public void registerAndLogin(String user, String password, String role) throws Exception {
+            String hash = Sha256.hex(password);
+            send(PacketType.REGISTER_REQ, PacketUtils.buildPayload(o -> {
+                o.writeUTF(user);
+                o.writeUTF(hash);
+                o.writeUTF(role);
+            }));
+            await(PacketType.REGISTER_RES, 3000);
+
+            send(PacketType.LOGIN_REQ, PacketUtils.buildPayload(o -> {
+                o.writeUTF(user);
+                o.writeUTF(hash);
+            }));
+            Packet login = await(PacketType.LOGIN_RES, 3000);
+            if (login == null) {
+                throw new IllegalStateException("khong nhan duoc LOGIN_RES");
+            }
+            DataInputStream r = PacketUtils.payloadReader(login.getPayload());
+            int ok = r.readByte();
+            String msg = r.readUTF();
+            if (ok == 0) {
+                throw new IllegalStateException(msg);
+            }
+        }
+
+        /** CREATE_ROOM_REQ, trả roomId; ném IllegalStateException nếu ok=0 hoặc hết giờ. */
+        public int createRoom(String name) throws Exception {
+            send(PacketType.CREATE_ROOM_REQ, PacketUtils.buildPayload(o -> o.writeUTF(name)));
+            Packet res = await(PacketType.CREATE_ROOM_RES, 3000);
+            if (res == null) {
+                throw new IllegalStateException("khong nhan duoc CREATE_ROOM_RES");
+            }
+            DataInputStream r = PacketUtils.payloadReader(res.getPayload());
+            int ok = r.readByte();
+            String msg = r.readUTF();
+            int roomId = r.readInt();
+            if (ok == 0) {
+                throw new IllegalStateException(msg);
+            }
+            return roomId;
+        }
+
+        /** JOIN_ROOM_REQ(roomId, udpPort), chờ JOIN_ROOM_RES; trả true nếu ok=1. */
+        public boolean join(int roomId, int udpPort) throws Exception {
+            send(PacketType.JOIN_ROOM_REQ, PacketUtils.buildPayload(o -> {
+                o.writeInt(roomId);
+                o.writeInt(udpPort);
+            }));
+            Packet res = await(PacketType.JOIN_ROOM_RES, 3000);
+            if (res == null) {
+                return false;
+            }
+            DataInputStream r = PacketUtils.payloadReader(res.getPayload());
+            int ok = r.readByte();
+            r.readUTF();
+            return ok == 1;
+        }
+
         /**
          * Đọc thẳng một gói từ socket, có timeout ở ĐẦU gói.
          *
@@ -584,7 +605,7 @@ public class TestClient {
          *
          * @return gói đọc được, hoặc {@code null} nếu hết thời gian chờ
          */
-        Packet readRawOrNull(int timeoutMs) throws IOException {
+        public Packet readRawOrNull(int timeoutMs) throws IOException {
             socket.setSoTimeout(timeoutMs);
             try {
                 return PacketUtils.readPacket(in);
@@ -594,7 +615,7 @@ public class TestClient {
         }
 
         /** Đọc thẳng cho tới khi gặp gói đúng loại (bỏ qua các loại khác). */
-        Packet awaitRaw(byte type, long timeoutMs) throws IOException {
+        public Packet awaitRaw(byte type, long timeoutMs) throws IOException {
             long deadline = System.currentTimeMillis() + timeoutMs;
             while (System.currentTimeMillis() < deadline) {
                 Packet p = readRawOrNull(400);
@@ -608,8 +629,7 @@ public class TestClient {
             return null;
         }
 
-
-        void openAudioSocket() throws IOException {
+        public void openAudioSocket() throws IOException {
             if (audioSocket == null) {
                 audioSocket = new DatagramSocket();     // cong ngau nhien do HDH cap
             }
@@ -629,12 +649,12 @@ public class TestClient {
             }
         }
 
-        void send(byte type, byte[] payload) throws IOException {
+        public void send(byte type, byte[] payload) throws IOException {
             PacketUtils.sendPacket(out, type, payload);
         }
 
         /** Chờ một gói đúng loại; các gói khác bị bỏ qua. */
-        Packet poll(byte type, long timeoutMs) throws InterruptedException {
+        public Packet poll(byte type, long timeoutMs) throws InterruptedException {
             if (!autoRead) {
                 try {
                     return awaitRaw(type, timeoutMs);
@@ -655,12 +675,12 @@ public class TestClient {
             return null;
         }
 
-        Packet await(byte type, long timeoutMs) throws InterruptedException {
+        public Packet await(byte type, long timeoutMs) throws InterruptedException {
             return poll(type, timeoutMs);
         }
 
         /** Chờ một trong hai loại gói — dùng khi cần bắt cả kết quả lẫn gói ERROR. */
-        Packet awaitEither(byte typeA, byte typeB, long timeoutMs) throws InterruptedException {
+        public Packet awaitEither(byte typeA, byte typeB, long timeoutMs) throws InterruptedException {
             if (!autoRead) {
                 long deadline = System.currentTimeMillis() + timeoutMs;
                 while (System.currentTimeMillis() < deadline) {
@@ -752,11 +772,5 @@ public class TestClient {
         buf[offset + 1] = (byte) (value >>> 16);
         buf[offset + 2] = (byte) (value >>> 8);
         buf[offset + 3] = (byte) value;
-    }
-
-    /** Cho phép các lớp test khác trỏ sang server khác. */
-    static void setTarget(String h, int p) {
-        host = h;
-        port = p;
     }
 }

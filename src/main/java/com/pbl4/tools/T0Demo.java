@@ -8,9 +8,9 @@ import com.pbl4.common.Sha256;
 import com.pbl4.server.ClientHandler;
 import com.pbl4.server.Room;
 import com.pbl4.server.RoomManager;
+import com.pbl4.server.ServerConfig;
 import com.pbl4.server.ServerMain;
 import com.pbl4.server.db.DatabaseManager;
-import com.pbl4.server.db.InMemoryDatabaseManager;
 
 import java.io.DataInputStream;
 import java.net.DatagramPacket;
@@ -32,16 +32,36 @@ import java.util.concurrent.TimeUnit;
  */
 public class T0Demo {
 
+    public record Result(int passed, int failed) {
+        public boolean ok() {
+            return failed == 0;
+        }
+    }
+
+    private int tcpPort;
+    private int udpPort;
+
+
     private static final String PASSWORD = "123456";
     private static final String HOST = "127.0.0.1";
 
-    private static int passCount = 0;
-    private static int failCount = 0;
+    private int passCount = 0;
+    private int failCount = 0;
 
-    public static void main(String[] args) throws Exception {
-        Locale.setDefault(Locale.US);
+        public static void main(String[] args) throws Exception {
+        java.util.Locale.setDefault(java.util.Locale.US);
         int port = (args.length > 0) ? Integer.parseInt(args[0]) : Protocol.TCP_PORT;
-        TestClient.setTarget(HOST, port);
+        ServerConfig config = new ServerConfig(port, Protocol.UDP_PORT, ":memory:");
+        Result r = run(config);
+        System.exit(r.ok() ? 0 : 1);
+    }
+
+    public static Result run(ServerConfig config) throws Exception {
+        java.util.Locale.setDefault(java.util.Locale.US);
+        return new T0Demo().execute(config);
+    }
+
+    private Result execute(ServerConfig config) throws Exception {
 
         System.out.println("########################################################");
         System.out.println("#  BAI KIEM THU MUC T0 - PBL4 De tai 21 (Day hoc truc tuyen)");
@@ -50,12 +70,13 @@ public class T0Demo {
         System.out.println();
 
         RoomManager rooms = new RoomManager();
-        DatabaseManager db = new InMemoryDatabaseManager();
-        ServerMain server = new ServerMain(port, rooms, db);
+        DatabaseManager db = new DatabaseManager(config.dbPath());
+        ServerMain server = new ServerMain(config, rooms, db);
+        this.tcpPort = server.getTcpPort();
+        this.udpPort = server.getUdpPort();
         Thread serverThread = new Thread(server::start, "server-main");
         serverThread.setDaemon(true);
-        serverThread.start();
-        Thread.sleep(600);                       // cho server kip mo cong
+        serverThread.start();                       // cho server kip mo cong
 
         try {
             runScenario(rooms);
@@ -68,16 +89,14 @@ public class T0Demo {
         System.out.println("########################################################");
         System.out.printf("#  KET QUA: %d DAT / %d TONG%n", passCount, passCount + failCount);
         System.out.println("########################################################");
-        if (failCount > 0) {
-            System.exit(1);
-        }
+        return new Result(passCount, failCount);
     }
 
-    private static void runScenario(RoomManager rooms) throws Exception {
+    private void runScenario(RoomManager rooms) throws Exception {
 
         // ============ 1. Giáo viên: đăng nhập, tạo lớp, VÀO lớp ============
         section("1. Giao vien dang nhap, tao lop, vao lop");
-        try (TestClient.Conn teacher = new TestClient.Conn()) {
+        try (TestClient.Conn teacher = new TestClient.Conn(HOST, tcpPort, udpPort)) {
             login(teacher, "lan", Protocol.ROLE_TEACHER);
             check("giao vien dang nhap duoc", true);
 
@@ -98,14 +117,14 @@ public class T0Demo {
 
             // ============ 2. Học sinh vào lớp ============
             section("2. Hoc sinh vao lop va danh sach thanh vien");
-            try (TestClient.Conn s1 = new TestClient.Conn()) {
+            try (TestClient.Conn s1 = new TestClient.Conn(HOST, tcpPort, udpPort)) {
                 login(s1, "minh", Protocol.ROLE_STUDENT);
                 joinRoom(s1, roomId);
                 Thread.sleep(200);
                 check("hoc sinh 1 vao lop, lop co 2 nguoi",
                         room != null && room.memberCount() == 2);
 
-                try (TestClient.Conn s2 = new TestClient.Conn()) {
+                try (TestClient.Conn s2 = new TestClient.Conn(HOST, tcpPort, udpPort)) {
                     login(s2, "an", Protocol.ROLE_STUDENT);
                     joinRoom(s2, roomId);
                     Thread.sleep(300);
@@ -133,7 +152,7 @@ public class T0Demo {
                     check("co sharing cua lop da bat", room != null && room.isSharing());
 
                     // Client mạng chậm: kết nối KHÔNG có luồng đọc nền.
-                    try (TestClient.Conn slow = new TestClient.Conn(false)) {
+                    try (TestClient.Conn slow = new TestClient.Conn(HOST, tcpPort, udpPort, false)) {
                         login(slow, "cham", Protocol.ROLE_STUDENT);
                         joinRoom(slow, roomId);
                         Thread.sleep(200);
@@ -197,7 +216,7 @@ public class T0Demo {
 
         // ============ 7. Dọn lớp rỗng ============
         section("7. Kiem tra don lop rong khoi bo nho");
-        Thread.sleep(600);
+        
         check("khong con lop nao trong bo nho (rooms=" + rooms.size() + ")",
                 rooms.size() == 0);
     }
@@ -207,27 +226,8 @@ public class T0Demo {
     // ==================================================================
 
     /** Đăng ký (bỏ qua nếu đã có) rồi đăng nhập. */
-    private static void login(TestClient.Conn conn, String user, String role) throws Exception {
-        String hash = Sha256.hex(PASSWORD);
-        conn.send(PacketType.REGISTER_REQ, PacketUtils.buildPayload(o -> {
-            o.writeUTF(user);
-            o.writeUTF(hash);
-            o.writeUTF(role);
-        }));
-        conn.await(PacketType.REGISTER_RES, 2000);
-
-        conn.send(PacketType.LOGIN_REQ, PacketUtils.buildPayload(o -> {
-            o.writeUTF(user);
-            o.writeUTF(hash);
-        }));
-        Packet res = conn.await(PacketType.LOGIN_RES, 2000);
-        if (res == null) {
-            throw new IllegalStateException("Khong dang nhap duoc: " + user);
-        }
-        DataInputStream r = PacketUtils.payloadReader(res.getPayload());
-        if (r.readByte() != 1) {
-            throw new IllegalStateException("Dang nhap that bai: " + user);
-        }
+    private void login(TestClient.Conn conn, String user, String role) throws Exception {
+        conn.registerAndLogin(user, "123456", role);
     }
 
     /**
@@ -235,17 +235,12 @@ public class T0Demo {
      * <p>Dùng CHUNG một DatagramSocket cho cả gửi và nhận — nếu không, server không nhận ra
      * người gửi và sẽ xảy ra vọng (xem AudioRelayServer).</p>
      */
-    private static void joinRoom(TestClient.Conn conn, int roomId) throws Exception {
+    private void joinRoom(TestClient.Conn conn, int roomId) throws Exception {
         conn.openAudioSocket();
-        int udpPort = conn.audioSocket.getLocalPort();
-        conn.send(PacketType.JOIN_ROOM_REQ, PacketUtils.buildPayload(o -> {
-            o.writeInt(roomId);
-            o.writeInt(udpPort);
-        }));
-        conn.await(PacketType.JOIN_ROOM_RES, 3000);
+        conn.join(roomId, conn.audioSocket.getLocalPort());
     }
 
-    private static void sendFrames(TestClient.Conn teacher, int count) throws Exception {
+    private void sendFrames(TestClient.Conn teacher, int count) throws Exception {
         byte[] frame = TestClient.fakeJpegFrame();
         for (int i = 0; i < count; i++) {
             frame[100] = (byte) i;
@@ -255,7 +250,7 @@ public class T0Demo {
     }
 
     /** Đếm frame nhận được trên client có luồng đọc nền. */
-    private static int drainFrames(TestClient.Conn conn, long millis) throws InterruptedException {
+    private int drainFrames(TestClient.Conn conn, long millis) throws InterruptedException {
         long deadline = System.currentTimeMillis() + millis;
         int count = 0;
         while (System.currentTimeMillis() < deadline) {
@@ -275,7 +270,7 @@ public class T0Demo {
      * Đọc 1 frame rồi nghỉ {@code sleepMs}, nên tốc độ tiêu thụ thấp hơn tốc độ server gửi
      * ⇒ đệm socket đầy ⇒ luồng ghi của server bị chặn ⇒ hàng đợi frame đầy ⇒ server bỏ frame.
      */
-    private static int readSlow(TestClient.Conn conn, long millis, int sleepMs) throws Exception {
+    private int readSlow(TestClient.Conn conn, long millis, int sleepMs) throws Exception {
         long deadline = System.currentTimeMillis() + millis;
         int count = 0;
         while (System.currentTimeMillis() < deadline) {
@@ -292,7 +287,7 @@ public class T0Demo {
     }
 
     /** Chạy đồng thời: giáo viên gửi thoại, học sinh nhận và đo mất gói. */
-    private static int[] runAudioTest(TestClient.Conn student, TestClient.Conn teacher,
+    private int[] runAudioTest(TestClient.Conn student, TestClient.Conn teacher,
                                       int roomId, int seconds) throws Exception {
         final int[] result = {0, 0};
 
@@ -340,7 +335,7 @@ public class T0Demo {
     }
 
     /** Giáo viên đã ở trong lớp rồi — ở đây chỉ bật mic, nói, rồi tắt mic. */
-    private static void sendAudio(TestClient.Conn teacher, int roomId, int seconds)
+    private void sendAudio(TestClient.Conn teacher, int roomId, int seconds)
             throws Exception {
         teacher.send(PacketType.AUDIO_ON, PacketUtils.buildPayload(o -> o.writeInt(roomId)));
 
@@ -352,7 +347,7 @@ public class T0Demo {
         for (int seq = 0; seq < total; seq++) {
             TestClient.writeInt(packet, Protocol.UDP_OFFSET_SEQ_NO, seq);
             teacher.audioSocket.send(
-                    new DatagramPacket(packet, packet.length, target, Protocol.UDP_PORT));
+                    new DatagramPacket(packet, packet.length, target, udpPort));
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000;
             long targetMs = (seq + 1) * 20L;
             if (targetMs > elapsedMs) {
@@ -378,7 +373,7 @@ public class T0Demo {
         return null;
     }
 
-    private static int readRoomId(Packet res) {
+    private int readRoomId(Packet res) {
         if (res == null) {
             return -1;
         }
@@ -392,7 +387,7 @@ public class T0Demo {
         }
     }
 
-    private static int readUserCount(Packet userList) {
+    private int readUserCount(Packet userList) {
         if (userList == null) {
             return -1;
         }
@@ -403,12 +398,12 @@ public class T0Demo {
         }
     }
 
-    private static void section(String title) {
+    private void section(String title) {
         System.out.println();
         System.out.println("--- " + title + " ---");
     }
 
-    private static void check(String name, boolean ok) {
+    private void check(String name, boolean ok) {
         if (ok) {
             passCount++;
         } else {

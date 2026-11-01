@@ -11,8 +11,9 @@ import com.pbl4.common.PacketUtils;
 import com.pbl4.common.Protocol;
 import com.pbl4.common.Sha256;
 import com.pbl4.server.RoomManager;
+import com.pbl4.server.ServerConfig;
 import com.pbl4.server.ServerMain;
-import com.pbl4.server.db.InMemoryDatabaseManager;
+import com.pbl4.server.db.DatabaseManager;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -61,7 +62,7 @@ public class TV2Chang2Test {
         System.out.println("########################################################");
 
         RoomManager rooms = new RoomManager();
-        server = new ServerMain(Protocol.TCP_PORT, rooms, new InMemoryDatabaseManager());
+        server = new ServerMain(ServerConfig.ephemeral(), rooms, new DatabaseManager(":memory:"));
         Thread serverThread = new Thread(server::start, "server-main");
         serverThread.setDaemon(true);
         serverThread.start();
@@ -84,12 +85,11 @@ public class TV2Chang2Test {
     }
 
     private static void runScenario() throws Exception {
-        TestClient.setTarget(HOST, Protocol.TCP_PORT);
 
         // ===== 1. Dựng lớp =====
         section("1. Dung lop hoc: 1 giao vien + 1 hoc sinh");
-        TestClient.Conn teacher = new TestClient.Conn();
-        TestClient.Conn student = new TestClient.Conn();
+        TestClient.Conn teacher = new TestClient.Conn(HOST, server.getTcpPort(), server.getUdpPort());
+        TestClient.Conn student = new TestClient.Conn(HOST, server.getTcpPort(), server.getUdpPort());
 
         // CẢ HAI client đều phải đăng ký + đăng nhập. Thiếu bước này thì server trả
         // lỗi "chua dang nhap" cho JOIN_ROOM_REQ, lớp chỉ có 1 người, và kênh thoại
@@ -113,8 +113,8 @@ public class TV2Chang2Test {
         check("giao vien bao cong UDP " + teacherAudio.getLocalPort(), true);
         check("hoc sinh bao cong UDP " + studentAudio.getLocalPort(), true);
         check("cong UDP la cong NGAU NHIEN, khong phai 9001",
-                teacherAudio.getLocalPort() != Protocol.UDP_PORT
-                        && studentAudio.getLocalPort() != Protocol.UDP_PORT);
+                teacherAudio.getLocalPort() != server.getUdpPort()
+                        && studentAudio.getLocalPort() != server.getUdpPort());
 
         // ===== 2. Định dạng gói =====
         section("2. Server co CHAP NHAN goi 648 byte khong");
@@ -244,7 +244,7 @@ public class TV2Chang2Test {
                 packet[off] = (byte) (value & 0xFF);              // little-endian
                 packet[off + 1] = (byte) ((value >> 8) & 0xFF);
             }
-            socket.send(new DatagramPacket(packet, packet.length, target, Protocol.UDP_PORT));
+            socket.send(new DatagramPacket(packet, packet.length, target, server.getUdpPort()));
 
             // Bù thời gian để giữ đúng nhịp 20 ms/gói (không dùng sleep(20) trần).
             long elapsedMs = (System.nanoTime() - t0) / 1_000_000;

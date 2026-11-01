@@ -31,26 +31,35 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class ServerMain {
 
-    private final int port;
     private final RoomManager rooms;
     private final DatabaseManager db;
     private final ExecutorService threadPool;
+    private final ServerSocket serverSocket;
     private final AudioRelayServer audioRelay;
     private final AtomicInteger connectedClients = new AtomicInteger();
 
     private volatile boolean running;
-    private ServerSocket serverSocket;
     private Thread statsThread;
 
-    public ServerMain(int port, RoomManager rooms, DatabaseManager db) throws IOException {
-        this.port = port;
+    public ServerMain(ServerConfig config, RoomManager rooms, DatabaseManager db) throws IOException {
         this.rooms = rooms;
         this.db = db;
         // Không truyền ThreadFactory riêng: mặc định của JDK đã đặt tên đúng dạng
         // "pool-1-thread-1", "pool-1-thread-2"... — chính là dạng tên mà tài liệu
         // yêu cầu in ra để chứng minh là dùng thread pool chứ không phải luồng chính.
         this.threadPool = Executors.newFixedThreadPool(Protocol.THREAD_POOL_SIZE);
-        this.audioRelay = new AudioRelayServer(rooms);
+        this.serverSocket = new ServerSocket(config.tcpPort(), Protocol.SOCKET_BACKLOG);
+        try {
+            this.audioRelay = new AudioRelayServer(rooms, config.udpPort());
+        } catch (IOException e) {
+            try {
+                this.serverSocket.close();
+            } catch (IOException closeEx) {
+                e.addSuppressed(closeEx);
+            }
+            this.threadPool.shutdownNow();
+            throw e;
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -58,12 +67,10 @@ public class ServerMain {
         // phải dùng dấu chấm cho nhất quán và cho khớp tài liệu, nên chốt locale ngay từ đầu.
         java.util.Locale.setDefault(java.util.Locale.US);
 
-        int port = (args.length > 0) ? Integer.parseInt(args[0]) : Protocol.TCP_PORT;
-
-        DatabaseManager db = new DatabaseManager("pbl4.db");
-
+        ServerConfig config = ServerConfig.fromArgs(args);
+        DatabaseManager db = new DatabaseManager(config.dbPath());
         RoomManager rooms = new RoomManager();
-        ServerMain server = new ServerMain(port, rooms, db);
+        ServerMain server = new ServerMain(config, rooms, db);
 
         Runtime.getRuntime().addShutdownHook(new Thread(server::stop, "shutdown-hook"));
         server.start();
@@ -74,21 +81,19 @@ public class ServerMain {
      */
     public void start() {
         running = true;
-        try (ServerSocket ss = new ServerSocket(port, Protocol.SOCKET_BACKLOG)) {
-            this.serverSocket = ss;
-
+        try {
             audioRelay.start();
             startStatsThread();
 
             System.out.println("[main] ===== SERVER DANG CHAY =====");
-            System.out.println("[main] TCP  : " + port + "  (dieu khien + man hinh)");
-            System.out.println("[main] UDP  : " + Protocol.UDP_PORT + "  (chi thoai PCM)");
+            System.out.println("[main] TCP  : " + getTcpPort() + "  (dieu khien + man hinh)");
+            System.out.println("[main] UDP  : " + getUdpPort() + "  (chi thoai PCM)");
             System.out.println("[main] Pool : " + Protocol.THREAD_POOL_SIZE + " luong, backlog " + Protocol.SOCKET_BACKLOG);
             System.out.println("[main] Payload toi da: " + Protocol.MAX_PAYLOAD + " byte");
             System.out.println("[main] Cho ket noi...");
 
             while (running) {
-                Socket socket = ss.accept();
+                Socket socket = serverSocket.accept();
                 connectedClients.incrementAndGet();
                 // Vòng lặp quay lại ngay — việc nặng đã giao cho pool.
                 threadPool.execute(new ClientHandler(socket, rooms, db));
@@ -104,6 +109,13 @@ public class ServerMain {
         } finally {
             shutdownPool();
             audioRelay.stop();
+            try {
+                if (!serverSocket.isClosed()) {
+                    serverSocket.close();
+                }
+            } catch (IOException ignored) {
+                // ignore
+            }
         }
     }
 
@@ -123,6 +135,11 @@ public class ServerMain {
         }
         if (statsThread != null) {
             statsThread.interrupt();
+        }
+        try {
+            db.close();
+        } catch (RuntimeException ignored) {
+            // ignore
         }
     }
 
@@ -175,6 +192,14 @@ public class ServerMain {
     }
 
     // ---------- Getter cho test ----------
+
+    public int getTcpPort() {
+        return serverSocket.getLocalPort();
+    }
+
+    public int getUdpPort() {
+        return audioRelay.getLocalPort();
+    }
 
     public RoomManager getRooms() {
         return rooms;
