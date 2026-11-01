@@ -111,6 +111,13 @@ public final class RoomHandler {
         }
         if (room.removeMember(c)) {
             c.log("roi lop " + current + " (" + c.getUsername() + ")");
+            if (room.isSharing() && room.isOwner(c.getUsername())) {
+                room.setSharing(false);
+                room.broadcastControl(PacketType.SCREEN_STOP,
+                        new Messages.ScreenNotice(room.getRoomId(),
+                                "Giao vien da roi lop, dung chia se man hinh").encode());
+                c.log("giao vien roi lop khi dang chia se -> tat chia se lop " + room.getRoomId());
+            }
             room.broadcastUserList();
         }
         if (room.isEmpty()) {

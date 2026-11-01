@@ -194,4 +194,29 @@ class ServerRulesTest {
         assertNotNull(hs.await(PacketType.SCREEN_STOP, 2000));
         assertFalse(rooms.get(id).isSharing());
     }
+
+    // ==================================================================
+    // B4 — Giáo viên rời/mất kết nối thì dừng chia sẻ
+    // ==================================================================
+
+    @Test
+    @Timeout(20)
+    void teacherDisconnectStopsShare() throws Exception {
+        Conn gv = client("gv1", Protocol.ROLE_TEACHER);
+        int id = gv.createRoom("Lop B4");
+        assertTrue(gv.join(id, 0));
+
+        Conn hs = client("hs1", Protocol.ROLE_STUDENT);
+        assertTrue(hs.join(id, 0));
+
+        gv.send(PacketType.SCREEN_START, new Messages.RoomIdOnly(id).encode());
+        assertNotNull(hs.await(PacketType.SCREEN_START, 2000));
+        assertTrue(rooms.get(id).isSharing());
+
+        gv.close();
+
+        assertNotNull(hs.await(PacketType.SCREEN_STOP, 3000));
+        assertNotNull(rooms.get(id));
+        assertFalse(rooms.get(id).isSharing());
+    }
 }
