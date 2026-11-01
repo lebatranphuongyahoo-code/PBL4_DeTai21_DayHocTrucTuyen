@@ -18,6 +18,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <exec.plugin.version>3.1.0</exec.plugin.version>
+        <junit.version>5.10.2</junit.version>
         <!--
             Class chay mac dinh khi go "mvn exec:java".
             Phai la PROPERTY (khong phai gia tri cung trong <configuration>), neu khong
@@ -39,10 +40,36 @@
             <artifactId>sqlite-jdbc</artifactId>
             <version>3.53.4.0</version>
         </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.5</version>
+                <configuration>
+                    <!-- Test khong mo cua so, khong dung mic/loa/man hinh. -->
+                    <argLine>-Djava.awt.headless=true -Duser.language=en -Duser.country=US</argLine>
+                </configuration>
+            </plugin>
 
             <!--
                 exec-maven-plugin: cho phep chay thang mot class bang Maven, khong can cau hinh IDE.
@@ -62,10 +89,11 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
+                <version>3.3.0</version>
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>com.pbl4.server.ServerMain</mainClass>
+                            <mainClass>com.pbl4.Launcher</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
@@ -75,8 +103,8 @@
                 Jar "beo": gom ca sqlite-jdbc vao de chay duoc bang `java -jar` tren may khong
                 cai Maven. KHONG co plugin nay thi jar chi chua code cua minh va server sap ngay
                 khi khoi dong voi "No suitable driver found for jdbc:sqlite".
-                Chu y: jar KHONG chay duoc client bang -jar (Main-Class la ServerMain);
-                chay client bang `java -cp <jar> com.pbl4.client.ui.LoginUI [ip] [port]`.
+                Dung `java -jar <jar> client [ip] [port]` de chay client (xem Launcher);
+                hoac chay client bang `java -cp <jar> com.pbl4.client.ui.LoginUI [ip] [port]`.
             -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

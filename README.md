@@ -43,8 +43,8 @@ Phần việc trong repo này chia làm 3 khối, mỗi người sở hữu mộ
 mvn -q compile
 
 # 2. Kiểm tra hợp đồng giao thức (bài tự kiểm bắt buộc của bước 1.2)
-mvn -q exec:java -Dexec.mainClass=com.pbl4.tools.PacketRoundTripTest
-#    Ky vong:  round-trip OK | type=18 | payload=5 byte
+mvn -q test -Dtest=PacketUtilsTest
+#    Ky vong:  Tests run: 7, Failures: 0
 
 # 3. Bài kiểm thử T0 đầy đủ — tự dựng server + 1 giáo viên + 3 học sinh
 mvn -q exec:java -Dexec.mainClass=com.pbl4.tools.T0Demo
