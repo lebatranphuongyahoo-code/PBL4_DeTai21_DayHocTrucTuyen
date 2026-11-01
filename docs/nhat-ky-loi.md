@@ -397,6 +397,263 @@ hãy **đo lại bản thân phép đo** trước khi sửa hệ thống.
 
 ---
 
+## [TV1] 11 — Công cụ đo gửi packet mà chưa đăng nhập, không tự dựng lớp (B0)
+
+**Hiện tượng.** Các công cụ đo (`screen-send`, `screen-recv`…) gửi `SCREEN_START`/frame ngay khi
+kết nối, server im lặng từ chối (`Ban chua dang nhap`), con số đo ra toàn 0 mà không có dòng lỗi
+nào nổi bật.
+
+**Nguyên nhân.** Tool **giả định** server đang ở trạng thái nào đó (đã có lớp, đã đăng nhập) thay
+vì **tự dựng** trạng thái đó. Cùng họ lỗi với [TV2] 08: gọi bất đồng bộ mà không kiểm tra kết quả.
+
+**Cách sửa.** `TestClient.Conn` tự `registerAndLogin`; tool gửi màn hình tự tạo lớp rồi vào lớp;
+thêm đo trễ frame (thời gian từ lúc server gửi tới lúc client nhận). Mọi mã trả về đều được kiểm.
+
+**Test.** `T0Demo` vẫn 20/20 sau khi công cụ tự dựng được toàn bộ kịch bản.
+**Commit.** `55313ed fix(tools): TestClient tu dang nhap, screen-send tao lop, do tre frame (B0)`
+
+**Bài học.** Công cụ đo phải **tự lo từ đầu tới cuối**: kết nối → đăng ký/đăng nhập → dựng lớp →
+vào lớp → đo. Bất kỳ bước nào dựa vào "ai đó đã làm sẵn" thì bài đo sẽ đỏ trên máy người khác.
+
+---
+
+## [TV1] 12 — Tạo lớp xong server restart là lớp biến mất (B1)
+
+**Hiện tượng.** Test đỏ: `expected: <0> but was: <1>` (lớp tồn tại trong RAM ngay sau khi tạo) và
+`expected: <true> but was: <false>` (không vào lại được lớp đã có người từng vào rồi rời hết).
+
+**Nguyên nhân.** `handleCreateRoom` cũ mở lớp trong RAM **ngay lúc tạo**:
+
+```java
+int newRoomId = db.createRoom(roomName, c.getUsername());
+rooms.createRoom(newRoomId, roomName, c.getUsername());   // sai: RAM chỉ là bản sao tạm
+```
+
+Lớp nằm trong `RoomManager` (bộ nhớ) chứ không chỉ trong SQLite ⇒ restart server mất lớp; và khi
+người cuối rời, `removeIfEmpty` xoá Room khỏi RAM ⇒ không ai vào lại được nữa dù CSDL vẫn còn.
+
+**Cách sửa.** Tách hai tầng: **CSDL là nguồn sự thật, RAM chỉ là phiên chạy**. `handleCreateRoom`
+chỉ gọi `db.createRoom(...)`; `handleJoinRoom` tra `db.findRoom(id)` rồi `rooms.openIfAbsent(info)`
+— nếu Room chưa có trong RAM thì tạo mới từ `RoomInfo`.
+
+**Test.** `createRoomDoesNotOpenRoomInMemory`, `roomCanBeRejoinedAfterEveryoneLeft`,
+`roomSurvivesServerRestart` — cả 3 đỏ trước khi sửa, xanh sau khi sửa.
+**Commit.** `782705b fix(server): mo lai lop tu CSDL khi vao, khong mo luc tao (B1)`
+
+**Bài học.** Bộ nhớ in-memory và CSDL phải có một **quy tắc rõ**: CSDL lưu trạng thái lâu dài,
+RAM chỉ cache phiên hiện hành. Mỗi thao tác phải hỏi "lưu ở đâu?" trước khi viết code.
+
+---
+
+## [TV1] 13 — "Phòng ma": vào lớp đúng lúc lớp bị dọn thì thành viên lạc vào Room đã bị xoá (B2)
+
+**Hiện tượng.** Test đồng bộ 8 luồng × 2000 lần vào/rời bắt được `ghostViolations > 0`: có thành
+viên nằm trong một `Room` mà `RoomManager.get(roomId)` trả `null` — người đó ở trong lớp nhưng
+không ai gửi được gì cho họ.
+
+**Nguyên nhân.** Tranh chấp thời gian: luồng A `rooms.get(id)` lấy được Room; luồng B (người cuối)
+rời lớp → `removeIfEmpty` xoá Room khỏi map; luồng A `room.addMember(...)` **thành công** — thêm
+người vào một Room đã bị gỡ khỏi map.
+
+**Cách sửa.** Room tự giữ **cờ `closed`** do `lock` bảo vệ; thêm `tryAddMember` trả `false` khi
+closed; `closeIfEmpty()` kiểm tra rỗng **và** đóng trong **cùng một vùng găng**:
+
+```java
+boolean closeIfEmpty() {
+    lock.lock();
+    try { if (members.isEmpty()) { closed = true; return true; } return false; }
+    finally { lock.unlock(); }
+}
+```
+
+`handleJoinRoom` dùng `openIfAbsent` + `tryAddMember` trong vòng thử lại (50 lần,
+`Thread.yield()` giữa các lần) — hoặc thêm vào thành công, hoặc nhận "Lop dang dong, vui long thu lai".
+
+**Test.** `RoomTest` (4 test: addRemoveCount, closeIfEmptyOnlyWhenEmpty, closedRoomRejectsMembers,
+snapshotIsCopy) + `RoomManagerTest` (3 test, trong đó `concurrentJoinLeaveNeverCreatesGhostRoom`
+chạy 8 luồng × 2000 lần, `@Timeout(30)`) — sau sửa `ghostViolations == 0`.
+**Commit.** `5e887ca fix(server): co closed trong Room chong phong ma khi vao/roi dong thoi (B2)`
+
+**Bài học.** "Kiểm tra rồi làm" gồm **hai bước** chỉ khi không có khoá. Muốn hai việc là một thì
+phải đưa cả hai vào **cùng một vùng găng**. Đây là bài toán check-then-act kinh điển.
+
+---
+
+## [TV1] 14 — Học sinh tự bật chia sẻ màn hình vì server chỉ tin `roomId` client gửi (B3)
+
+**Hiện tượng.** Test đỏ: học sinh gửi `SCREEN_STOP` và giáo viên khác gửi `SCREEN_START` đều
+không nhận được gói `ERROR` nào — server im lặng làm theo.
+
+**Nguyên nhân.** Server xử lý `SCREEN_START` chỉ dựa vào `roomId` trong payload — client tự khai
+mình ở lớp nào, server không đối chiếu **vai trò** và **quyền chủ lớp**:
+
+```java
+Room room = rooms.get(packet.getRoomId());   // tin client 100%
+room.setSharing(true);                        // ai cũng bật được
+```
+
+**Cách sửa.** "Không bao giờ tin client": thêm `Room.isOwner(username)`; `ScreenHandler` kiểm
+`ROLE_TEACHER.equals(c.getRole()) && room.isOwner(c.getUsername())` cho START/STOP, frame chỉ
+relay khi `isOwner`. Người bị từ chối nhận `ERROR "Chi giao vien cua lop duoc ..."`.
+
+**Test.** `studentCannotStopTeacherShare`, `otherTeacherCannotShare`, `ownerCanStopShare` — đỏ
+trước, xanh sau. T0 mục 3 (học sinh bị từ chối) vẫn DAT.
+**Commit.** `6704406 fix(server): chi giao vien chu lop duoc bat/tat/gui man hinh (B3)`
+
+**Bài học.** Quyền hạn phải được kiểm tra **tại nơi dữ liệu vào server**, dựa trên phiên đăng
+nhập phía server — không bao giờ dựa vào trường client tự gửi. Kiểm tra ở UI chỉ là trang trí.
+
+---
+
+## [TV1] 15 — Giáo viên rời lớp thì cờ chia sẻ kẹt `true`, cả lớp treo màn hình (B4)
+
+**Hiện tượng.** Test đỏ: giáo viên đang chia sẻ, ngắt kết nối — `SCREEN_STOP` không bao giờ được
+phát, `room.isSharing()` vẫn `true`, danh sách học sinh mãi chờ frame.
+
+**Nguyên nhân.** Đường rời lớp chỉ `removeMember` + `broadcastUserList`, **không ai tắt cờ
+sharing**. Cờ chỉ được tắt bởi chính giáo viên gửi `SCREEN_STOP` — nhưng họ đã ngắt kết nối.
+
+**Cách sửa.** Trong `leaveCurrentRoom`, sau khi `removeMember` thành công:
+
+```java
+if (room.isSharing() && room.isOwner(c.getUsername())) {
+    room.setSharing(false);
+    room.broadcastControl(PacketType.SCREEN_STOP,
+            new Messages.ScreenNotice(room.getRoomId(),
+                    "Giao vien da roi lop, dung chia se man hinh").encode());
+}
+```
+
+**Test.** `teacherDisconnectStopsShare` — đỏ trước, xanh sau; client học sinh nhận được
+`SCREEN_STOP` trong 3 giây sau khi giáo viên `close()`.
+**Commit.** `5b9f0c8 fix(server): giao vien roi lop thi tat chia se (B4)`
+
+**Bài học.** Mỗi **trạng thái có chủ** (cờ sharing thuộc về giáo viên) phải có **đường dọn dẹp khi
+chủ biến mất** — ngắt kết nối cũng là một cách "rời lớp", và thường là cách phổ biến nhất giữa
+buổi học (mạngWifi rớt).
+
+---
+
+## [TV1] 16 — Tin nhắn chat không có tên người gửi, còn dính khoảng trắng thừa (B5)
+
+**Hiện tượng.** Test đỏ: người nhận thấy `  xin chao ` nguyên bản (giữ khoảng trắng client gửi)
+và không biết ai nói — mọi tin nhắn trông như hệ thống tự nói.
+
+**Nguyên nhân.** `handleChat` chuyển tiếp nguyên payload, không tiền tố, không kiểm roomId, không
+giới hạn độ dài — ai cũng có thể gửi chat hộ lớp khác bằng cách khai `roomId` khác.
+
+**Cách sửa.** Decode `ChatText` → từ chối nếu `msg.roomId() != room.getRoomId()`; `strip()` văn
+bản, bỏ qua nếu rỗng, chặn trên 1000 ký tự; phát kèm tên:
+
+```java
+room.broadcastControl(PacketType.CHAT_TEXT,
+        new Messages.ChatText(room.getRoomId(), c.getUsername() + ": " + text).encode());
+```
+
+**Test.** `chatIsPrefixedWithSender` (`"  xin chao "` → `"minh: xin chao"`),
+`chatToOtherRoomRejected` — đỏ trước, xanh sau.
+**Commit.** `d5dd10c fix(server): chat kem ten nguoi gui (B5)`
+
+**Bài học.** Server là nơi **chuẩn hoá nội dung phát đi** — trim, giới hạn độ dài, gắn nguồn. Để
+client tự xử rồi relay nguyên bản là mỗi client một chuẩn, và kẻ xấu gửi gì cả lớp nhận nấy.
+
+---
+
+## [TV1] 17 — Relay UDP chuyển tiếp gói của người lạ và của người chưa bật mic (B6)
+
+**Hiện tượng.** Test đỏ: một `DatagramSocket` lạ (không trong lớp) gửi 20 gói 648 byte đúng
+roomId → học sinh **nhận đủ 20 gói**; thành viên chưa gửi `AUDIO_ON` nói → vẫn được relay.
+
+**Nguyên nhân.** `AudioRelayServer.handle` sau khi tra phòng chỉ **trừ người gửi** rồi phát cho
+tất cả thành viên — không kiểm tra "người gửi có phải thành viên không" và "đã bật mic chưa":
+
+```java
+// cũ: chỉ trừ người gửi, ai gửi cũng relay
+if (member.isSameUdpSource(sourceAddress, sourcePort)) { continue; }
+```
+
+**Cách sửa.** Tìm người gửi trong danh sách thành viên đã sao chép dưới khoá; không tìm thấy hoặc
+chưa bật mic thì **bỏ gói và đếm**:
+
+```java
+if (sender == null || !sender.isMicOn()) {
+    packetsRejected.incrementAndGet();
+    return;
+}
+```
+
+Thêm `getPacketsRejected()` để đo; javadoc đầu lớp thêm bước "kiểm tra người gửi là thành viên
+đang bật mic".
+
+**Test.** `udpFromNonMemberIsNotRelayed` (20 gói lạ → `SocketTimeoutException`, rejected ≥ 20),
+`udpFromMemberWithoutMicIsNotRelayed` (10 gói → rejected ≥ 10); T0 mục 5 (đường thoại hợp lệ)
+vẫn 20/20 — chứng minh không làm hỏng chức năng thật.
+**Commit.** `ccc3034 fix(server): relay UDP chi nhan tu thanh vien da bat mic (B6)`
+
+**Bài học.** UDP không có kết nối nên **mỗi gói đến đều là người lạ cho tới khi chứng minh được
+ngược lại**. Đồng thời bật mic phải là trạng thái phía server (`micOn`) — client tự nói không
+tạo ra quyền nói.
+
+---
+
+## [TV1] 18 — Đăng ký nhận tên `"a"` và hash `"abc"`, tạo lớp tên 101 ký tự, lệnh không cần đăng nhập (B7)
+
+**Hiện tượng.** Test đỏ: `REGISTER_REQ` với tên `"a"`, `"co dau cach"`, 33 ký tự, hoặc hash
+`"abc"` đều **thành công**; `CREATE_ROOM_REQ` tên 101 ký tự thành công; `LEAVE_ROOM` gửi từ kết
+nối chưa đăng nhập không bị từ chối.
+
+**Nguyên nhân.** `handleRegister` chỉ kiểm vai trò, tin tuyệt đối tên và hash; `handleCreateRoom`
+chỉ kiểm tên rỗng; bốn lệnh `LEAVE_ROOM`, `AUDIO_ON`, `AUDIO_OFF`, `SCREEN_STOP` không có
+`requireLogin` — client chưa đăng nhập vẫn thao tác được.
+
+**Cách sửa.** Hai regex ở `AuthHandler`:
+
+```java
+private static final Pattern USERNAME   = Pattern.compile("[A-Za-z0-9_.]{2,32}");
+private static final Pattern SHA256_HEX = Pattern.compile("[0-9a-f]{64}");
+```
+
+Tên lớp: rỗng hoặc > 100 ký tự → `"Ten lop phai tu 1 den 100 ky tu"`. Thêm `requireLogin` vào cả
+4 handler trên; `handleScreenFrame` chưa đăng nhập thì bỏ qua im lặng. Lưu ý kéo theo:
+`TV2Chang2Test` dùng tên `"gv-hoang"`/`"hs-hoang"` có dấu gạch ngang — không khớp regex, đổi
+thành `"gv_hoang"`/`"hs_hoang"`.
+
+**Test.** `registerRejectsBadUsername` (3 tên xấu), `registerRejectsBadHash`, `createRoomRejectsLongName`,
+`leaveWithoutLoginGetsError` (`"Ban chua dang nhap"`) — đỏ trước, xanh sau.
+**Commit.** `e4949ba fix(server): kiem tra dau vao dang ky/tao lop, requireLogin day du (B7)`
+
+**Bài học.** Mọi chuỗi từ client là **đầu vào không tin được** — quy tắc: đăng ký chặn ở regex,
+tạo tài nguyên chặn ở độ dài, **mọi lệnh** đều bắt đầu bằng `requireLogin`. Khi siết quy tắc mới,
+phải chạy lại **tất cả** công cụ đo — chữ ký hợp lệ cũ có thể thành bất hợp lệ.
+
+---
+
+## [TV1] 19 — T0 đỏ ngẫu nhiên ở mục 7 "dọn lớp rỗng" (flaky)
+
+**Hiện tượng.** Đôi lần chạy, mục cuối báo `[KHONG] khong con lop nao trong bo nho (rooms=1)`
+— chạy lại lại DAT. Lỗi "ma" không tái hiện được mỗi lần.
+
+**Nguyên nhân.** Việc dọn lớp chạy trên luồng của server **sau khi** socket đóng (đọc EOF →
+`cleanup` → `leaveCurrentRoom` → `removeIfEmpty`). Bài test đọc `rooms.size()` **ngay sau**
+`close()`, nên căn vào tốc độ máy: máy nhanh thấy 0, máy chậm thấy 1. Lỗi không có thật —
+chỉ là bài đo thiếu sự chờ đợi.
+
+**Cách sửa.** Chờ tối đa 3 giây thay vì đọc đúng một lần:
+
+```java
+long deadline = System.currentTimeMillis() + 3000;
+while (rooms.size() > 0 && System.currentTimeMillis() < deadline) { Thread.sleep(20); }
+```
+
+**Test.** `T0Demo` chạy lặp lại nhiều lần liên tiếp, 20/20 ổn định.
+**Commit.** `ec5b667 fix(tools): T0Demo cho don lop toi da 3s truoc khi check, chong flaky`
+
+**Bài học.** Test đỏ ngẫu nhiên phải được coi là **lỗi của bài test** cho tới khi chứng minh
+ngược lại. Với các sự kiện chạy trên luồng khác, hãy chờ có giới hạn (deadline) thay vì assert
+ngay — assert ngay sau khi gửi lệnh bất đồng bộ là đo nhịp thời gian, không phải đo logic.
+
+---
+
 ## Mẫu ghi cho lỗi tiếp theo
 
 ```
