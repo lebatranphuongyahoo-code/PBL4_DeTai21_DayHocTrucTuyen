@@ -1,9 +1,6 @@
 package com.pbl4.client.ui;
 
-import com.pbl4.client.media.AudioPlayer;
-import com.pbl4.client.media.AudioRecorder;
-import com.pbl4.client.media.JitterBuffer;
-import com.pbl4.client.media.MediaStats;
+import com.pbl4.client.media.AudioSession;
 import com.pbl4.client.media.ScreenCapturer;
 import com.pbl4.client.media.ScreenReceiver;
 import com.pbl4.client.net.ServerConnection;
@@ -32,7 +29,6 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
-import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.List;
@@ -43,28 +39,9 @@ import java.util.Objects;
  */
 public class ClassroomUI {
 
-    /**
-     * Adapter implemented by the audio module; implementations live with TV2's audio code.
-     */
-    public interface AudioPlayerControl {
-        int start() throws Exception;
-
-        void stop();
-    }
-
-    /**
-     * Adapter implemented by the audio module; implementations live with TV2's audio code.
-     */
-    public interface AudioRecorderControl {
-        void start(String serverIp, int serverPort, int roomId) throws Exception;
-
-        void stop();
-    }
-
     private final ServerConnection connection;
-    private final DatagramSocket audioSocket;
-    private final AudioPlayerControl audioPlayer;
-    private final AudioRecorderControl audioRecorder;
+    private final AudioSession audio;
+    private final String username;
     private final String serverIp;
     private final int roomId;
     private final String role;
@@ -86,29 +63,23 @@ public class ClassroomUI {
     private boolean inRoom = true;
 
     public ClassroomUI(ServerConnection connection, String username, String role,
-                       int roomId, String roomName, DatagramSocket audioSocket, String serverIp) {
-        this(connection, username, role, roomId, roomName, audioSocket, serverIp,
-                createAudioPlayer(audioSocket), createAudioRecorder(audioSocket));
-    }
-
-    public ClassroomUI(ServerConnection connection, String username, String role,
-                       int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
-                       AudioPlayerControl audioPlayer, AudioRecorderControl audioRecorder) {
+                       int roomId, String roomName, AudioSession audio, String serverIp) {
         this.connection = Objects.requireNonNull(connection, "connection");
-        this.audioSocket = audioSocket;
+        this.audio = audio;
+        this.username = Objects.requireNonNull(username, "username");
         this.roomId = roomId;
         this.role = Objects.requireNonNull(role, "role");
         this.serverIp = Objects.requireNonNull(serverIp, "serverIp");
-        this.audioPlayer = audioPlayer;
-        this.audioRecorder = audioRecorder;
         this.frame = new JFrame("Lớp " + roomName + " (" + roomId + ")");
 
-        buildWindow(username);
+        buildWindow();
         startAudioPlayback();
         connection.setListener(this::onPacket);
         connection.setDisconnectListener(cause -> SwingUtilities.invokeLater(() -> {
             inRoom = false;
-            stopAudioDevices();
+            if (audio != null) {
+                audio.close();
+            }
             stopScreenCapturer();
             sharing = false;
             shareButton.setText("Chia sẻ màn hình");
@@ -129,63 +100,20 @@ public class ClassroomUI {
      * <p>Server relay thoại cho <b>mọi</b> thành viên đã đăng ký cổng UDP, không phân biệt
      * người đó có bật mic hay không. Vì vậy nếu chỉ mở loa lúc bấm "Bật Mic" thì học sinh
      * ngồi nghe sẽ không nhận được gì — gói UDP vẫn tới cổng nhưng không có luồng nào đọc.
-     * Nút mic chỉ điều khiển <i>đường gửi</i>; đường nhận luôn chạy từ lúc vào lớp.
+     * Nút mic chỉ điều khiển <i>đường gửi</i>; đường nhận luôn chạy từ lúc vào lớp.</p>
      */
     private void startAudioPlayback() {
-        if (audioPlayer == null) {
+        if (audio == null) {
             return;
         }
         try {
-            audioPlayer.start();
+            audio.startPlayback();
         } catch (Exception e) {
             showStatus("Không mở được loa: " + e.getMessage(), true);
         }
     }
 
-    private static AudioPlayerControl createAudioPlayer(DatagramSocket socket) {
-        if (socket == null) {
-            return null;
-        }
-        AudioPlayer player = new AudioPlayer(socket, new JitterBuffer(), new MediaStats());
-        return new AudioPlayerControl() {
-            @Override
-            public int start() throws Exception {
-                player.start();
-                return socket.getLocalPort();
-            }
-
-            @Override
-            public void stop() {
-                player.stop();
-            }
-        };
-    }
-
-    private static AudioRecorderControl createAudioRecorder(DatagramSocket socket) {
-        if (socket == null) {
-            return null;
-        }
-        return new AudioRecorderControl() {
-            private AudioRecorder recorder;
-
-            @Override
-            public void start(String serverIp, int serverPort, int roomId) throws Exception {
-                if (recorder == null) {
-                    recorder = new AudioRecorder(socket, InetAddress.getByName(serverIp), serverPort);
-                }
-                recorder.start(roomId);
-            }
-
-            @Override
-            public void stop() {
-                if (recorder != null) {
-                    recorder.stop();
-                }
-            }
-        };
-    }
-
-    private void buildWindow(String username) {
+    private void buildWindow() {
         JPanel membersPanel = new JPanel(new BorderLayout());
         membersPanel.setBorder(BorderFactory.createTitledBorder("Thành viên"));
         memberList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -197,7 +125,7 @@ public class ClassroomUI {
         center.add(new JLabel("Người dùng: " + username), BorderLayout.NORTH);
 
         JPanel controlBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
-        micButton.setEnabled(audioPlayer != null && audioRecorder != null);
+        micButton.setEnabled(audio != null);
         controlBar.add(micButton);
         if (Protocol.ROLE_TEACHER.equals(role)) {
             controlBar.add(shareButton);
@@ -231,10 +159,9 @@ public class ClassroomUI {
 
             @Override
             public void windowClosed(WindowEvent event) {
-                ClassroomUI.this.stopAudioDevices();
                 ClassroomUI.this.stopScreenCapturer();
-                if (ClassroomUI.this.audioSocket != null) {
-                    ClassroomUI.this.audioSocket.close();
+                if (ClassroomUI.this.audio != null) {
+                    ClassroomUI.this.audio.close();
                 }
                 ClassroomUI.this.connection.close();
             }
@@ -242,12 +169,12 @@ public class ClassroomUI {
     }
 
     private void toggleMicrophone() {
-        if (audioPlayer == null || audioRecorder == null) {
+        if (audio == null) {
             showStatus("Chưa được kết nối với phần âm thanh của client.", true);
             return;
         }
         if (micOn) {
-            audioRecorder.stop();
+            audio.stopMic();
             micOn = false;
             micButton.setText("Bật Mic");
             try {
@@ -264,12 +191,12 @@ public class ClassroomUI {
             // Loa đã chạy từ lúc vào lớp; cổng UDP chính là cổng đã đăng ký trong JOIN_ROOM_REQ.
             byte[] payload = new Messages.RoomIdOnly(roomId).encode();
             connection.send(PacketType.AUDIO_ON, payload);
-            audioRecorder.start(serverIp, Protocol.UDP_PORT, roomId);
+            audio.startMic(InetAddress.getByName(serverIp), Protocol.UDP_PORT, roomId);
             micOn = !micOn;
             micButton.setText(micOn ? "Tắt Mic" : "Bật Mic");
             showStatus("Đã bật mic.", false);
         } catch (Exception e) {
-            audioRecorder.stop();
+            audio.stopMic();
             try {
                 byte[] offPayload = new Messages.RoomIdOnly(roomId).encode();
                 connection.send(PacketType.AUDIO_OFF, offPayload);
@@ -277,15 +204,6 @@ public class ClassroomUI {
                 e.addSuppressed(offException);
             }
             showStatus("Không thể bật mic: " + e.getMessage(), true);
-        }
-    }
-
-    private void stopAudioDevices() {
-        if (audioRecorder != null) {
-            audioRecorder.stop();
-        }
-        if (audioPlayer != null) {
-            audioPlayer.stop();
         }
     }
 
@@ -393,8 +311,9 @@ public class ClassroomUI {
         inRoom = false;
         try {
             if (micOn) {
-                audioRecorder.stop();
-                audioPlayer.stop();
+                if (audio != null) {
+                    audio.stopMic();
+                }
                 micOn = false;
                 byte[] audioOffPayload = new Messages.RoomIdOnly(roomId).encode();
                 connection.send(PacketType.AUDIO_OFF, audioOffPayload);

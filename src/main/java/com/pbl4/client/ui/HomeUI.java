@@ -1,5 +1,6 @@
 package com.pbl4.client.ui;
 
+import com.pbl4.client.media.AudioSession;
 import com.pbl4.client.net.ServerConnection;
 import com.pbl4.common.Packet;
 import com.pbl4.common.PacketType;
@@ -24,7 +25,6 @@ import java.awt.FlowLayout;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.io.IOException;
-import java.net.DatagramSocket;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +34,7 @@ import java.util.Objects;
 public class HomeUI {
 
     private final ServerConnection connection;
-    private final DatagramSocket audioSocket;
+    private final AudioSession audio;
     private final String username;
     private final String role;
     private final String serverIp;
@@ -60,15 +60,15 @@ public class HomeUI {
         this.role = role;
         this.serverIp = Objects.requireNonNull(serverIp, "serverIp");
         boolean teacher = Protocol.ROLE_TEACHER.equals(role);
-        DatagramSocket openedAudioSocket;
+        AudioSession openedAudio;
         try {
-            openedAudioSocket = new DatagramSocket(0);
+            openedAudio = AudioSession.open();
         } catch (SocketException e) {
-            openedAudioSocket = null;
+            openedAudio = null;
             statusLabel.setForeground(Color.RED);
             statusLabel.setText("Không mở được cổng UDP nhận thoại: " + e.getMessage());
         }
-        audioSocket = openedAudioSocket;
+        audio = openedAudio;
 
         buildWindow(username, role, teacher);
         connection.setListener(this::onPacket);
@@ -84,7 +84,7 @@ public class HomeUI {
         joinButton.addActionListener(event -> joinSelectedRoom());
         frame.setVisible(true);
 
-        if (audioSocket != null) {
+        if (audio != null) {
             requestRoomList();
         }
     }
@@ -93,7 +93,7 @@ public class HomeUI {
         JPanel createPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         createPanel.add(new JLabel("Tên lớp:"));
         createPanel.add(roomNameField);
-        createRoomButton.setEnabled(teacher && audioSocket != null);
+        createRoomButton.setEnabled(teacher && audio != null);
         createPanel.add(createRoomButton);
         createHint.setText(teacher ? "" : "Chỉ giáo viên được tạo lớp.");
         createPanel.add(createHint);
@@ -104,7 +104,7 @@ public class HomeUI {
         roomPanel.add(new JScrollPane(roomList), BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        refreshButton.setEnabled(audioSocket != null);
+        refreshButton.setEnabled(audio != null);
         joinButton.setEnabled(false);
         actions.add(refreshButton);
         actions.add(joinButton);
@@ -113,7 +113,7 @@ public class HomeUI {
                 joinButton.setEnabled(!event.getValueIsAdjusting()
                         && roomList.getSelectedValue() != null
                         && connectionAlive
-                        && audioSocket != null));
+                        && audio != null));
 
         JPanel footer = new JPanel(new BorderLayout());
         footer.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
@@ -136,8 +136,8 @@ public class HomeUI {
             @Override
             public void windowClosed(WindowEvent event) {
                 if (!handedOff) {
-                    if (audioSocket != null) {
-                        audioSocket.close();
+                    if (audio != null) {
+                        audio.close();
                     }
                     HomeUI.this.connection.close();
                 }
@@ -161,12 +161,12 @@ public class HomeUI {
 
     private void joinSelectedRoom() {
         RoomEntry selected = roomList.getSelectedValue();
-        if (selected == null || audioSocket == null) {
+        if (selected == null || audio == null) {
             showStatus("Hãy chọn lớp cần tham gia.", true);
             return;
         }
         byte[] payload = new Messages.JoinRoomRequest(
-                selected.info().roomId(), audioSocket.getLocalPort()).encode();
+                selected.info().roomId(), audio.localPort()).encode();
         joiningRoom = selected;
         joinButton.setEnabled(false);
         sendRequest(PacketType.JOIN_ROOM_REQ, payload, "Đang tham gia lớp...");
@@ -225,7 +225,7 @@ public class HomeUI {
                             synchronized (joinPacketLock) {
                                 classroom = new ClassroomUI(connection, username, role,
                                         joined.info().roomId(), joined.info().roomName(),
-                                        audioSocket, serverIp);
+                                        audio, serverIp);
                                 buffered = new ArrayList<>(earlyMemberPackets);
                                 earlyMemberPackets.clear();
                             }
@@ -236,7 +236,7 @@ public class HomeUI {
                         } else {
                             joinButton.setEnabled(connectionAlive
                                     && roomList.getSelectedValue() != null
-                                    && audioSocket != null);
+                                    && audio != null);
                             showStatus(res.message(), true);
                         }
                     });
