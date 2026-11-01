@@ -63,10 +63,23 @@ public final class RoomHandler {
 
         // Mỗi client chỉ ở trong MỘT phòng tại một thời điểm (mục 1.5.4).
         leaveCurrentRoom(c);
+        c.enterRoom(info.roomId(), req.udpPort()); // đặt trạng thái TRƯỚC khi thêm, để relay thấy cổng UDP ngay
 
-        Room room = rooms.openIfAbsent(info);
-        c.enterRoom(targetRoomId, clientUdpPort);
-        room.addMember(c);
+        Room room = null;
+        for (int attempt = 0; attempt < 50 && room == null; attempt++) {
+            Room candidate = rooms.openIfAbsent(info);
+            if (candidate.tryAddMember(c)) {
+                room = candidate;
+            } else {
+                Thread.yield();                    // lớp cũ vừa đóng, chờ RoomManager gỡ nó ra rồi thử lại
+            }
+        }
+        if (room == null) {
+            c.clearRoomState();
+            c.sendControl(PacketType.JOIN_ROOM_RES,
+                    new Messages.StatusResponse(false, "Lop dang dong, vui long thu lai").encode());
+            return;
+        }
 
         c.sendControl(PacketType.JOIN_ROOM_RES,
                 new Messages.StatusResponse(true, "Da vao lop " + room.getRoomName()).encode());

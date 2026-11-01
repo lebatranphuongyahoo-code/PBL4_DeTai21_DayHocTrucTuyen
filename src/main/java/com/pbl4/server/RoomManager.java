@@ -44,14 +44,11 @@ public class RoomManager {
      */
     public boolean removeIfEmpty(int roomId) {
         Room room = rooms.get(roomId);
-        if (room == null) {
+        if (room == null || !room.closeIfEmpty()) {
             return false;
         }
-        if (room.isEmpty()) {
-            // remove(key, value): chỉ xoá nếu vẫn đúng đối tượng đó — tránh xoá nhầm lớp vừa được tạo lại.
-            return rooms.remove(roomId, room);
-        }
-        return false;
+        rooms.remove(roomId, room);
+        return true;
     }
 
     public int memberCount(int roomId) {

@@ -39,6 +39,9 @@ public class Room {
     /** Khoá riêng của lớp này. */
     private final ReentrantLock lock = new ReentrantLock();
 
+    /** Đã đóng chưa — CHỈ đọc/ghi khi giữ lock. Lớp đã đóng không nhận thêm thành viên. */
+    private boolean closed;
+
     /** Giáo viên của lớp này có đang chia sẻ màn hình không (bước 3.1). */
     private volatile boolean sharing;
 
@@ -56,12 +59,34 @@ public class Room {
     // Thành viên
     // ==================================================================
 
-    public void addMember(ClientHandler handler) {
+    /**
+     * Thêm thành viên. Trả {@code false} nếu lớp vừa bị đóng (người cuối cùng vừa rời) —
+     * khi đó bên gọi phải lấy lại lớp từ RoomManager và thử lại.
+     */
+    public boolean tryAddMember(ClientHandler handler) {
         lock.lock();
         try {
+            if (closed) {
+                return false;
+            }
             if (!members.contains(handler)) {
                 members.add(handler);
             }
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Đóng lớp nếu rỗng — kiểm tra và đóng trong CÙNG một vùng găng, nên không ai chen vào giữa được. */
+    boolean closeIfEmpty() {
+        lock.lock();
+        try {
+            if (members.isEmpty()) {
+                closed = true;
+                return true;
+            }
+            return false;
         } finally {
             lock.unlock();
         }
