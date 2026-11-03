@@ -26,7 +26,7 @@ public class AuthService {
     private final String dummyHash = encoder.encode("dummy-password-for-timing");
     private final SecureRandom random = new SecureRandom();
     public AuthService(Database db) { this.db = db; }
-    public static User publicUser(Database.Account a) { return new User(a.username(),a.displayName(),a.role()); }
+    public static User publicUser(Database.Account a) { return new User(a.username(),a.displayName(),"USER"); }
     private String text(String value) { return value == null ? "" : value.strip(); }
     public User register(Registration input) throws SQLException {
         String username=text(input.username()), displayName=text(input.displayName()), password=input.password()==null?"":input.password();
@@ -35,10 +35,10 @@ public class AuthService {
         if (displayName.length()<2 || displayName.length()>80 || displayName.codePoints().anyMatch(Character::isISOControl)) errors.put("displayName","Họ tên cần 2–80 ký tự.");
         if (password.length()<8 || password.getBytes(StandardCharsets.UTF_8).length>72 || password.codePoints().anyMatch(Character::isISOControl) || !password.matches("(?s).*[A-Z].*") || !password.matches("(?s).*[a-z].*") || !password.matches("(?s).*[0-9].*") || password.codePoints().noneMatch(c -> !Character.isLetterOrDigit(c) && !Character.isWhitespace(c)))
             errors.put("password","Mật khẩu cần ít nhất 8 ký tự, tối đa 72 byte UTF-8, có chữ hoa A–Z, chữ thường a–z, số và ký tự đặc biệt.");
-        if (input.role()!=null && !input.role().equals("STUDENT")) errors.put("role","Không được tự cấp quyền giáo viên hoặc quản trị viên.");
+        if (input.role()!=null && !input.role().equals("STUDENT")) errors.put("role","Tài khoản không chọn vai trò. Quyền được xác định theo từng lớp.");
         if (!errors.isEmpty()) throw new Failure(400,"Kiểm tra lại thông tin đăng ký.",errors);
         if (!db.createStudent(username, displayName, encoder.encode(password))) throw new Failure(409,"Tên tài khoản đã tồn tại.",Map.of("username","Tên tài khoản đã tồn tại."));
-        return new User(username,displayName,"STUDENT");
+        return new User(username,displayName,"USER");
     }
     public Session login(Login input) throws SQLException {
         Database.Account account = db.findAccount(text(input.username()));

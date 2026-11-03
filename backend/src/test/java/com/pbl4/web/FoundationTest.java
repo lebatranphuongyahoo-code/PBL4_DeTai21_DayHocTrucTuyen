@@ -24,7 +24,7 @@ class FoundationTest {
         assertEquals(409,assertThrows(AuthService.Failure.class,()->auth.register(new AuthService.Registration("LEARNER","Nguyễn An","Strong!23",null))).status);
         assertThrows(AuthService.Failure.class,()->auth.login(new AuthService.Login("learner","wrong")));
         var session=auth.login(new AuthService.Login("LEARNER","Strong!23"));
-        assertEquals("STUDENT",session.user().role());
+        assertEquals("USER",session.user().role());
         db.close();
         var reopened=new Database(path);
         assertEquals("learner",reopened.sessionAccount(AuthService.tokenHash(session.token())).username());

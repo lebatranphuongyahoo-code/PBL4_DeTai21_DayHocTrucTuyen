@@ -12,14 +12,6 @@ public class OperatorCommand implements ApplicationRunner {
     public OperatorCommand(Database db){this.db=db;}
     @Override public void run(ApplicationArguments args)throws Exception {
         if(!args.containsOption("grant-teacher"))return;
-        var names=args.getOptionValues("grant-teacher");
-        if(names==null||names.size()!=1||names.getFirst().isBlank())throw new IllegalArgumentException("Use --grant-teacher=username");
-        db.transaction(c->{
-            try(var s=c.prepareStatement("UPDATE accounts SET role='TEACHER' WHERE username=? AND role='STUDENT' AND status='ACTIVE'")){
-                s.setString(1,names.getFirst().strip());
-                if(s.executeUpdate()!=1)throw new IllegalArgumentException("Active student not found; no account was changed.");
-            }return null;
-        });
-        System.out.println("Teacher privilege granted by local operator. Restart browser login to refresh role.");
+        System.out.println("--grant-teacher is retired. Every active account can create a classroom; ownership defines permissions per classroom. No account was changed.");
     }
 }

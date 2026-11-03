@@ -46,10 +46,10 @@ class MediaRelayTest {
     }
     @Test void realSocketsEnforceRoomIsolationPacketsAndRevocation() throws Exception {
         for(String name:List.of("teacher","learner","outsider"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE accounts SET role='TEACHER' WHERE username='teacher'");}return null;});
+        db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE accounts SET role='TEACHER' WHERE username='learner'");}return null;});
         var teacher=db.findAccount("teacher");var student=db.findAccount("learner");
-        var first=rooms.create(teacher,"First class");var second=rooms.create(teacher,"Other class");
-        rooms.add(teacher,first.id(),"learner");rooms.add(teacher,second.id(),"outsider");
+        var first=rooms.create(teacher,"First class");var second=rooms.create(student,"Other class");
+        rooms.add(teacher,first.id(),"learner");rooms.add(student,second.id(),"outsider");
         var teacherSession=auth.login(new AuthService.Login("teacher","Strong!23"));
         var studentSession=auth.login(new AuthService.Login("learner","Strong!23"));
         var otherSession=auth.login(new AuthService.Login("outsider","Strong!23"));

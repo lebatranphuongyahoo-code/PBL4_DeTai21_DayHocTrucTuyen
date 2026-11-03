@@ -1,5 +1,5 @@
 export type User = { username: string; displayName: string; role: string };
-export type Room = { id: number; name: string; members: number };
+export type Room = { id: number; name: string; members: number; owned: boolean };
 export type Member = { id: number; username: string; displayName: string; role: string };
 export type Detail = { id: number; name: string; owner: string; owned: boolean; inviteCode: string | null; members: Member[] };
 export type JoinRequest = { accountId: number; username: string; displayName: string };

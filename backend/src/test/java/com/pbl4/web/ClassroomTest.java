@@ -15,7 +15,9 @@ class ClassroomTest {
             for(String username:new String[]{"teacher","other","student"})auth.register(new AuthService.Registration(username,username,"Strong!23",null));
             db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE accounts SET role='TEACHER' WHERE username IN ('teacher','other')");}return null;});
             var teacher=db.findAccount("teacher");var other=db.findAccount("other");var student=db.findAccount("student");
-            assertThrows(AuthService.Failure.class,()->rooms.create(student,"Toán"));
+            var studentOwned=rooms.create(student,"Lớp của tài khoản cũ STUDENT");
+            assertTrue(rooms.mediaAccess(student,studentOwned.id()));
+            rooms.archive(student,studentOwned.id());
             var room=rooms.create(teacher,"Toán ứng dụng");
             assertThrows(AuthService.Failure.class,()->rooms.detail(student,room.id()));
             assertThrows(AuthService.Failure.class,()->rooms.add(other,room.id(),"student"));

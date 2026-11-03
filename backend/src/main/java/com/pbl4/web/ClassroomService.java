@@ -33,7 +33,7 @@ public class ClassroomService {
         }
     }
     private void active(Stored room) { if(!room.status().equals("ACTIVE")) throw invalid("Lớp đã được lưu trữ."); }
-    private void owner(Database.Account user,Stored room) { if(room.ownerId()!=user.id() || !user.role().equals("TEACHER")) throw denied(); active(room); }
+    private void owner(Database.Account user,Stored room) { if(room.ownerId()!=user.id()) throw denied(); active(room); }
     private void access(Connection c,Database.Account user,Stored room) throws SQLException {
         active(room);if(room.ownerId()!=user.id() && !member(c,room.id(),user.id())) throw denied();
     }
@@ -43,17 +43,16 @@ public class ClassroomService {
     /** Small access query used for every relay operation, including existing sockets. */
     public boolean mediaAccess(Database.Account user,long id) throws SQLException {
         return db.transaction(c->{Stored room=room(c,id);access(c,user,room);
-            return room.ownerId()==user.id() && user.role().equals("TEACHER");});
+            return room.ownerId()==user.id();});
     }
     private Detail detail(Connection c,Database.Account user,Stored room) throws SQLException {
         var members=new ArrayList<Member>();
         try(var s=c.prepareStatement("SELECT a.id,a.username,a.display_name,a.role FROM accounts a WHERE a.id=? OR EXISTS(SELECT 1 FROM classroom_members m WHERE m.classroom_id=? AND m.account_id=a.id) ORDER BY a.display_name,a.id")) {
-            s.setLong(1,room.ownerId());s.setLong(2,room.id());try(var r=s.executeQuery()){while(r.next()) members.add(new Member(r.getLong(1),r.getString(2),r.getString(3),r.getString(4)));}
+            s.setLong(1,room.ownerId());s.setLong(2,room.id());try(var r=s.executeQuery()){while(r.next()) members.add(new Member(r.getLong(1),r.getString(2),r.getString(3),r.getLong(1)==room.ownerId()?"OWNER":"MEMBER"));}
         }
         return new Detail(room.id(),room.name(),room.owner(),room.ownerId()==user.id(),room.ownerId()==user.id()?room.invite():null,members);
     }
     public Detail create(Database.Account user,String name) throws SQLException {
-        if(!user.role().equals("TEACHER")) throw denied();
         String clean=name==null?"":name.strip();
         if(clean.length()<2||clean.length()>100||clean.codePoints().anyMatch(Character::isISOControl))throw invalid("Tên lớp cần 2–100 ký tự.");
         return db.transaction(c->{
@@ -72,9 +71,10 @@ public class ClassroomService {
     }
     public void add(Database.Account user,long id,String username) throws SQLException {
         db.transaction(c->{Stored room=room(c,id);owner(user,room);
-            try(var s=c.prepareStatement("SELECT id FROM accounts WHERE username=? AND role='STUDENT' AND status='ACTIVE'")){
+            try(var s=c.prepareStatement("SELECT id FROM accounts WHERE username=? AND status='ACTIVE'")){
                 s.setString(1,username==null?"":username.strip());try(var r=s.executeQuery()){
                     if(!r.next())throw invalid("Không tìm thấy tài khoản học viên đang hoạt động.");
+                    if(r.getLong(1)==room.ownerId())throw invalid("Tài khoản này đã là chủ lớp.");
                     addMember(c,id,r.getLong(1));
                 }
             }return null;
@@ -101,12 +101,11 @@ public class ClassroomService {
         });
     }
     public void requestJoin(Database.Account user,String code) throws SQLException {
-        if(!user.role().equals("STUDENT"))throw denied();
         db.transaction(c->{
             long id;
-            try(var s=c.prepareStatement("SELECT id FROM classrooms WHERE invite_code=? AND status='ACTIVE'")){
+            try(var s=c.prepareStatement("SELECT id,owner_id FROM classrooms WHERE invite_code=? AND status='ACTIVE'")){
                 s.setString(1,code==null?"":code.strip().toUpperCase(Locale.ROOT));
-                try(var r=s.executeQuery()){if(!r.next())throw invalid("Mã lớp không hợp lệ.");id=r.getLong(1);}
+                try(var r=s.executeQuery()){if(!r.next())throw invalid("Mã lớp không hợp lệ.");id=r.getLong(1);if(r.getLong(2)==user.id())throw invalid("Bạn đã là chủ lớp.");}
             }
             if(member(c,id,user.id()))throw invalid("Bạn đã là thành viên lớp.");
             try(var s=c.prepareStatement("INSERT INTO join_requests(classroom_id,account_id,status,requested_at) VALUES(?,?,'PENDING',?) ON CONFLICT(classroom_id,account_id) DO UPDATE SET status='PENDING',requested_at=excluded.requested_at,reviewed_at=NULL,reviewed_by=NULL WHERE join_requests.status!='PENDING'")){
@@ -133,7 +132,7 @@ public class ClassroomService {
     }
     public void review(Database.Account user,long id,long account,boolean approve)throws SQLException {
         db.transaction(c->{owner(user,room(c,id));
-            try(var s=c.prepareStatement("UPDATE join_requests SET status=?,reviewed_at=?,reviewed_by=? WHERE classroom_id=? AND account_id=? AND status='PENDING' AND EXISTS(SELECT 1 FROM accounts a WHERE a.id=? AND a.status='ACTIVE' AND a.role='STUDENT')")){
+            try(var s=c.prepareStatement("UPDATE join_requests SET status=?,reviewed_at=?,reviewed_by=? WHERE classroom_id=? AND account_id=? AND status='PENDING' AND EXISTS(SELECT 1 FROM accounts a WHERE a.id=? AND a.status='ACTIVE')")){
                 s.setString(1,approve?"APPROVED":"REJECTED");s.setLong(2,System.currentTimeMillis());s.setLong(3,user.id());s.setLong(4,id);s.setLong(5,account);s.setLong(6,account);
                 if(s.executeUpdate()!=1)throw new AuthService.Failure(409,"Yêu cầu không còn chờ duyệt.",Map.of());
             }

@@ -14,7 +14,7 @@ import jakarta.annotation.PreDestroy;
 @Component
 public class Database {
     public record Account(long id, String username, String displayName, String passwordHash, String role) {}
-    public record Classroom(long id, String name, int members) {}
+    public record Classroom(long id, String name, int members, boolean owned) {}
     private final Connection connection;
     @FunctionalInterface interface Transaction<T> { T execute(Connection connection) throws SQLException; }
     synchronized <T> T transaction(Transaction<T> work) throws SQLException {
@@ -90,10 +90,10 @@ public class Database {
         try (PreparedStatement s = connection.prepareStatement("DELETE FROM sessions WHERE token_hash=?")) { s.setString(1,hash); s.executeUpdate(); }
     }
     public synchronized List<Classroom> listClassrooms(long accountId) throws SQLException {
-        try (PreparedStatement s = connection.prepareStatement("SELECT c.id,c.name,(SELECT count(*) FROM classroom_members cm WHERE cm.classroom_id=c.id) members FROM classrooms c WHERE c.status='ACTIVE' AND (c.owner_id=? OR EXISTS(SELECT 1 FROM classroom_members m WHERE m.classroom_id=c.id AND m.account_id=?)) ORDER BY c.id")) {
+        try (PreparedStatement s = connection.prepareStatement("SELECT c.id,c.name,(SELECT count(*) FROM classroom_members cm WHERE cm.classroom_id=c.id) members,c.owner_id FROM classrooms c WHERE c.status='ACTIVE' AND (c.owner_id=? OR EXISTS(SELECT 1 FROM classroom_members m WHERE m.classroom_id=c.id AND m.account_id=?)) ORDER BY c.id")) {
             s.setLong(1,accountId); s.setLong(2,accountId);
             var result = new ArrayList<Classroom>();
-            try (ResultSet rs = s.executeQuery()) { while(rs.next()) result.add(new Classroom(rs.getLong(1),rs.getString(2),rs.getInt(3))); }
+            try (ResultSet rs = s.executeQuery()) { while(rs.next()) result.add(new Classroom(rs.getLong(1),rs.getString(2),rs.getInt(3),rs.getLong(4)==accountId)); }
             return result;
         }
     }
