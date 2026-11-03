@@ -5,7 +5,7 @@ class ClassroomCapture extends AudioWorkletProcessor {
     if (!input) return true;
     for (const sample of input) this.samples.push(sample);
     const ratio = sampleRate / 16000;
-    while (this.samples.length >= 320 * ratio + 1) {
+    while (this.samples.length >= Math.ceil(this.position + 319 * ratio) + 2) {
       const out = new Float32Array(320);
       for (let i = 0; i < 320; i++) {
         const at = this.position + i * ratio;

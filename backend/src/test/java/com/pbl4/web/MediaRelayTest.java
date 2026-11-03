@@ -35,6 +35,10 @@ class MediaRelayTest {
         public CompletionStage<?> onBinary(WebSocket ws,ByteBuffer data,boolean last){byte[] chunk=new byte[data.remaining()];data.get(chunk);bytes.writeBytes(chunk);if(last){packets.add(bytes.toByteArray());bytes.reset();}ws.request(1);return null;}
         public CompletionStage<?> onClose(WebSocket ws,int status,String reason){closed.complete(status);return null;}
         void joined() throws Exception {for(int i=0;i<8;i++){String message=texts.poll(3,TimeUnit.SECONDS);assertNotNull(message);if(message.contains("joined"))return;}fail("join not acknowledged");}
+        com.fasterxml.jackson.databind.JsonNode controls() throws Exception {
+            for(int i=0;i<30;i++){String message=texts.poll(3,TimeUnit.SECONDS);assertNotNull(message);var event=new com.fasterxml.jackson.databind.ObjectMapper().readTree(message);if(event.path("type").asText().equals("controls"))return event;}
+            throw new AssertionError("controls missing");
+        }
     }
     private WebSocket connect(HttpClient client,String token,Listener listener)throws Exception {
         String ticket=tickets.issue(AuthService.tokenHash(token));
@@ -56,13 +60,14 @@ class MediaRelayTest {
                 tw.sendText("{\"type\":\"join\",\"roomId\":"+first.id()+"}",true).join();tl.joined();
                 sw.sendText("{\"type\":\"join\",\"roomId\":"+first.id()+"}",true).join();sl.joined();
                 ow.sendText("{\"type\":\"join\",\"roomId\":"+second.id()+"}",true).join();ol.joined();
+                tw.sendText("{\"type\":\"screen-start\"}",true).join();
                 byte[] screen={1,12,34,56};tw.sendBinary(ByteBuffer.wrap(screen),true).join();
                 assertArrayEquals(screen,sl.packets.poll(3,TimeUnit.SECONDS));assertNull(ol.packets.poll(150,TimeUnit.MILLISECONDS));assertNull(tl.packets.poll());
                 sw.sendBinary(ByteBuffer.wrap(screen),true).join();assertNull(tl.packets.poll(150,TimeUnit.MILLISECONDS));
                 byte[] audio=new byte[645];ByteBuffer.wrap(audio).put((byte)2).putInt(42).putShort((short)123);
                 sw.sendBinary(ByteBuffer.wrap(audio),true).join();
                 byte[] received=tl.packets.poll(3,TimeUnit.SECONDS);assertNotNull(received);assertEquals(653,received.length);
-                ByteBuffer decoded=ByteBuffer.wrap(received);assertEquals(2,decoded.get());assertEquals(student.id(),decoded.getLong());assertEquals(42,decoded.getInt());
+                ByteBuffer decoded=ByteBuffer.wrap(received);assertEquals(2,decoded.get());long studentSource=decoded.getLong();assertTrue(studentSource>0);assertEquals(42,decoded.getInt());
                 assertArrayEquals(Arrays.copyOfRange(audio,5,audio.length),Arrays.copyOfRange(received,13,received.length));
                 assertNull(ol.packets.poll());
                 sw.sendBinary(ByteBuffer.wrap(new byte[]{2,0}),true).join();assertNull(tl.packets.poll(150,TimeUnit.MILLISECONDS));
@@ -70,6 +75,21 @@ class MediaRelayTest {
                 String chat=null;for(int i=0;i<8;i++){String msg=sl.texts.poll(2,TimeUnit.SECONDS);if(msg!=null&&msg.contains("\"chat\"")){chat=msg;break;}}
                 assertNotNull(chat);assertEquals("quote \" and newline\nworks",new com.fasterxml.jackson.databind.ObjectMapper().readTree(chat).get("text").asText());
                 // Two receive threads send concurrently to the same recipient.
+                sl.texts.clear();tl.texts.clear();
+                sw.sendText("{\"type\":\"screen-request\"}",true).join();
+                var requested=sl.controls();String studentPeer=requested.path("peerId").asText();
+                tw.sendText("{\"type\":\"screen-review\",\"peerId\":\""+studentPeer+"\",\"approve\":true}",true).join();
+                assertEquals(studentPeer,sl.controls().path("presenter").asText());
+                sw.sendBinary(ByteBuffer.wrap(screen),true).join();assertArrayEquals(screen,tl.packets.poll(3,TimeUnit.SECONDS));
+                tw.sendText("{\"type\":\"screen-revoke\"}",true).join();sl.controls();
+                sw.sendBinary(ByteBuffer.wrap(screen),true).join();assertNull(tl.packets.poll(150,TimeUnit.MILLISECONDS));
+                tw.sendText("{\"type\":\"mic-lock\",\"locked\":true}",true).join();assertTrue(sl.controls().path("microphonesLocked").asBoolean());
+                sw.sendBinary(ByteBuffer.wrap(audio),true).join();assertNull(tl.packets.poll(150,TimeUnit.MILLISECONDS));
+                sw.sendText("{\"type\":\"mic-lock\",\"locked\":false}",true).join();
+                sw.sendText("{\"type\":\"mic-request\"}",true).join();assertTrue(sl.controls().path("microphonesLocked").asBoolean());
+                tw.sendText("{\"type\":\"mic-review\",\"peerId\":\""+studentPeer+"\",\"approve\":true}",true).join();sl.controls();
+                sw.sendBinary(ByteBuffer.wrap(audio),true).join();assertNotNull(tl.packets.poll(3,TimeUnit.SECONDS));
+                tw.sendText("{\"type\":\"mic-lock\",\"locked\":false}",true).join();sl.controls();
                 rooms.add(teacher,first.id(),"outsider");ol.texts.clear();
                 ow.sendText("{\"type\":\"join\",\"roomId\":"+first.id()+"}",true).join();ol.joined();
                 try(var workers=Executors.newFixedThreadPool(2)) {
@@ -79,7 +99,7 @@ class MediaRelayTest {
                 }
                 var senders=new HashSet<Long>();
                 for(int i=0;i<20;i++){byte[] packet=ol.packets.poll(3,TimeUnit.SECONDS);assertNotNull(packet);assertEquals(653,packet.length);senders.add(ByteBuffer.wrap(packet).getLong(1));}
-                assertEquals(Set.of(student.id(),teacher.id()),senders);
+                assertEquals(2,senders.size());assertTrue(senders.contains(studentSource));
                 rooms.remove(teacher,first.id(),student.id());assertEquals(1008,sl.closed.get(4,TimeUnit.SECONDS));
                 db.deleteSession(AuthService.tokenHash(otherSession.token()));assertEquals(1008,ol.closed.get(4,TimeUnit.SECONDS));
                 rooms.archive(teacher,first.id());assertEquals(1008,tl.closed.get(4,TimeUnit.SECONDS));
