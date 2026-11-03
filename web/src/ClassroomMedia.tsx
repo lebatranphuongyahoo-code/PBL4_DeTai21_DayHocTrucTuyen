@@ -25,6 +25,9 @@ export function ClassroomMedia({ roomId, roomName, ownerName, owned, token, user
   const [controls, setControls] = useState<Controls | null>(null);
   const permissions = useRef<Controls | null>(null), receivedAudio = useRef(0), sentAudio = useRef(0);
   const [diagnostics, setDiagnostics] = useState('');
+  const [decision,setDecision]=useState('');
+  const ownerPresent=!!controls?.participants.some(p=>p.owner);
+  const pending=controls?.participants.filter(p=>!p.owner&&(p.screenRequested||p.micRequested))??[];
   const me = controls?.participants.find(p => p.peerId === controls.peerId);
   const canShare = owned || (!!controls && controls.presenter === controls.peerId);
   const canSpeak = owned || !!me?.micAllowed;
@@ -94,10 +97,10 @@ export function ClassroomMedia({ roomId, roomName, ownerName, owned, token, user
   useEffect(() => {
     const current = ++generation.current;
     setConnected(false); setChat([]); replaceImage(''); setStatus('Đang kết nối phòng học…');
-    setControls(null); permissions.current = null; receivedAudio.current = 0; sentAudio.current = 0;
+    setControls(null);setDecision(''); permissions.current = null; receivedAudio.current = 0; sentAudio.current = 0;
     let lastMessage = Date.now();
     const timer = window.setInterval(() => {
-      command('ping');
+      if(socket.current?.readyState===WebSocket.OPEN)socket.current.send(JSON.stringify({type:'ping'}));
       setDiagnostics(`Mic: ${capture.current?.state ?? 'tắt'} · Loa: ${playback.current?.context.state ?? 'tắt'} · Gói gửi/nhận: ${sentAudio.current}/${receivedAudio.current}`);
       if (socket.current?.readyState === WebSocket.OPEN && Date.now() - lastMessage > 45_000) { socket.current.close(); setStatus('Media không phản hồi. Hãy kết nối lại.'); }
     }, 5000);
@@ -115,7 +118,10 @@ export function ClassroomMedia({ roomId, roomName, ownerName, owned, token, user
             try {
               const message = JSON.parse(event.data);
               if (message.type === 'controls') {
-                const next = message as Controls; permissions.current = next; setControls(next);
+                const next = message as Controls; const previous=permissions.current; const oldSelf=previous?.participants.find(p=>p.peerId===previous.peerId);const nextSelf=next.participants.find(p=>p.peerId===next.peerId);
+                if(oldSelf?.screenRequested&&!nextSelf?.screenRequested)setDecision(next.presenter===next.peerId?'Đã được phép chia sẻ. Bấm Chia sẻ bài giảng để chọn nguồn.':'Yêu cầu chia sẻ đã bị từ chối hoặc hủy.');
+                if(oldSelf?.micRequested&&!nextSelf?.micRequested)setDecision(nextSelf?.micAllowed?'Đã được phép phát biểu. Bạn tự bấm Bật mic.':'Yêu cầu phát biểu đã bị từ chối hoặc hủy.');
+                permissions.current = next; setControls(next);
                 const self = next.participants.find(p => p.peerId === next.peerId);
                 if (!self?.micAllowed) stopMic();
                 if (next.presenter !== next.peerId) stopScreen(false);
@@ -236,32 +242,33 @@ export function ClassroomMedia({ roomId, roomName, ownerName, owned, token, user
     event.preventDefault(); const text = draft.trim();
     if (text && connected && socket.current?.readyState === WebSocket.OPEN) { socket.current.send(JSON.stringify({ type: 'chat', text })); setDraft(''); }
   }
-  return <div className="classroom-media">
+  return <div className="classroom-media"><h1 className="visually-hidden">{roomName}</h1>
     <div className="meeting-status" role="status"><span>{status}</span>{!connected&&<button className="ghost-button" onClick={()=>setAttempt(x=>x+1)}>Kết nối lại</button>}</div>
+    <div className="classroom-notices">{connected&&!owned&&!ownerPresent&&<p role="status" className="owner-absent">Chủ lớp đang vắng mặt. Quyền mic hiện tại được giữ; yêu cầu mới cần chờ chủ lớp quay lại.</p>}{decision&&<p role="status">{decision}</p>}{owned&&pending.length>0&&<div className="request-alert" role="status"><strong>{pending.length} người đang chờ duyệt chia sẻ hoặc phát biểu</strong><button className="ghost-button" onClick={()=>setSidebarTab('people')}>Xem yêu cầu ({pending.length})</button></div>}</div>
     <section className="media-panel lecture-panel" ref={stage}>
       <div className="stage-label"><span className={connected ? 'live-dot connected' : 'live-dot'}/>{connected ? 'Đã kết nối' : 'Chưa kết nối'}</div>
       <div className="stage-course"><span className="avatar">{ownerName.slice(0,2).toUpperCase()}</span><div><strong>{roomName}</strong><small>{ownerName} · Chủ lớp</small></div></div>
       <div className="screen-placeholder">{image && !sharing ? <img className="shared-screen" src={image} alt="Màn hình đang được chia sẻ"/> : <div className="stage-waiting"><div className="whiteboard-art"><Icon name="screen"/><span>Bài giảng trực tiếp</span><i/><i/><i/></div><strong>{sharing ? 'Bạn đang trình bày' : 'Sẵn sàng vào bài học'}</strong><p>{sharing ? 'Cửa sổ bài giảng đang được gửi tới lớp.' : 'Màn hình bài giảng sẽ xuất hiện tại đây khi bắt đầu chia sẻ.'}</p></div>}</div>
-      <div className="participant-strip" aria-label="Người đang kết nối">{controls?.participants.map(p=><div className={`participant-tile ${controls.presenter===p.peerId?'presenting':''}`} key={p.peerId}><span className="avatar">{p.username.slice(0,2).toUpperCase()}</span><strong>{p.username}{p.peerId===controls.peerId?' (bạn)':''}</strong><small>{p.owner?'Chủ lớp':'Thành viên'}</small></div>)}</div>
+      <div className="participant-strip" role="group" aria-label="Người đang kết nối">{controls?.participants.map(p=><div className={`participant-tile ${controls.presenter===p.peerId?'presenting':''}`} key={p.peerId}><span className="avatar">{p.username.slice(0,2).toUpperCase()}</span><strong>{p.username}{p.peerId===controls.peerId?' (bạn)':''}</strong><small>{p.owner?'Chủ lớp':'Thành viên'}</small></div>)}</div>
       <div className="media-controls">
         <button className="ghost-button round-control" title={listening?'Tắt loa':'Bật loa'} aria-label={listening?'Tắt loa':'Bật loa'} disabled={!connected} aria-pressed={listening} onClick={()=>listening?stopListening():void listen().catch(()=>setStatus('Không mở được loa.'))}><Icon name="volume"/>{!listening&&<span className="control-slash"/>}</button>
         <button className="ghost-button round-control" title="Phóng to bài giảng" aria-label="Phóng to bài giảng" disabled={!document.fullscreenEnabled} onClick={()=>void (document.fullscreenElement?document.exitFullscreen():stage.current?.requestFullscreen())?.catch(()=>setStatus('Trình duyệt không cho phép phóng to.'))}><Icon name="expand"/></button>
         <button className="ghost-button round-control" disabled={!connected||micBusy||!canSpeak} title={!canSpeak?'Mic đang bị khóa':micBusy?'Đang mở mic…':micOn?'Tắt mic':'Bật mic'} aria-label={!canSpeak?'Mic đang bị khóa':micBusy?'Đang mở mic…':micOn?'Tắt mic':'Bật mic'} aria-pressed={micOn} onClick={()=>micOn?stopMic():void startMic()}><Icon name="mic"/>{!micOn&&<span className="control-slash"/>}</button>
         <button className="round-control leave-control" title="Rời buổi học" aria-label="Rời buổi học" onClick={onExit}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16c-2-2-2-4 0-6 4-4 14-4 18 0 2 2 2 4 0 6l-5-2v-3H8v3Z" fill="currentColor"/></svg></button>
-        {canShare?<button className="ghost-button round-control" title={sharing?'Dừng chia sẻ':'Chia sẻ bài giảng'} aria-label={shareBusy?'Đang chọn nguồn…':sharing?'Dừng chia sẻ':'Chia sẻ bài giảng'} aria-pressed={sharing} disabled={!connected||shareBusy} onClick={()=>sharing?stopScreen():void startScreen()}><Icon name="screen"/></button>:<button className="ghost-button round-control" title={me?.screenRequested?'Hủy yêu cầu chia sẻ':'Xin chia sẻ màn hình'} aria-label={me?.screenRequested?'Hủy yêu cầu chia sẻ':'Xin chia sẻ màn hình'} disabled={!connected} onClick={()=>command(me?.screenRequested?'screen-cancel':'screen-request')}><Icon name="screen"/></button>}
+        {canShare?<button className="ghost-button round-control" title={sharing?'Dừng chia sẻ':'Chia sẻ bài giảng'} aria-label={shareBusy?'Đang chọn nguồn…':sharing?'Dừng chia sẻ':'Chia sẻ bài giảng'} aria-pressed={sharing} disabled={!connected||shareBusy} onClick={()=>sharing?stopScreen():void startScreen()}><Icon name="screen"/></button>:<button className="ghost-button round-control" title={me?.screenRequested?'Hủy yêu cầu chia sẻ':'Xin chia sẻ màn hình'} aria-label={me?.screenRequested?'Hủy yêu cầu chia sẻ':'Xin chia sẻ màn hình'} disabled={!connected||(!ownerPresent&&!me?.screenRequested)} onClick={()=>{setDecision(me?.screenRequested?'Đã hủy yêu cầu chia sẻ.':'Đã gửi yêu cầu chia sẻ. Chờ chủ lớp duyệt.');command(me?.screenRequested?'screen-cancel':'screen-request');}}><Icon name="screen"/></button>}
         <button className="ghost-button round-control" title="Trong phòng & điều hành" aria-label="Trong phòng & điều hành" onClick={()=>setSidebarTab('people')}><Icon name="settings"/></button>
       </div>
-      {!canSpeak&&<button className="speech-request ghost-button" disabled={!connected||me?.micRequested} onClick={()=>command('mic-request')}>{me?.micRequested?'Đang chờ cho phép phát biểu':'Xin phát biểu'}</button>}
+      {!canSpeak&&<button className="speech-request ghost-button" disabled={!connected||!ownerPresent||me?.micRequested} onClick={()=>{setDecision('Đã gửi yêu cầu phát biểu. Chờ chủ lớp duyệt.');command('mic-request');}}>{me?.micRequested?'Đang chờ cho phép phát biểu':'Xin phát biểu'}</button>}
     </section>
     <section className="media-panel chat-panel">
-      <h3>Trao đổi trong lớp</h3><div className="sidebar-tabs" role="tablist" aria-label="Trao đổi và thành viên"><button role="tab" aria-selected={sidebarTab==='chat'} onClick={()=>setSidebarTab('chat')}>Tin nhắn</button><button role="tab" aria-selected={sidebarTab==='people'} onClick={()=>setSidebarTab('people')}>Trong phòng <span>{controls?.participants.length??0}</span></button></div>
+      <h2>Trao đổi trong lớp</h2><div className="sidebar-tabs" role="tablist" aria-label="Trao đổi và thành viên"><button role="tab" aria-selected={sidebarTab==='chat'} onClick={()=>setSidebarTab('chat')}>Tin nhắn</button><button role="tab" aria-selected={sidebarTab==='people'} onClick={()=>setSidebarTab('people')}>Trong phòng <span>{controls?.participants.length??0}</span>{owned&&pending.length>0&&<b className="pending-count">{pending.length} chờ duyệt</b>}</button></div>
       <div className="chat-content" hidden={sidebarTab!=='chat'}><div className="chat-messages" aria-live="polite">{chat.length===0&&<div className="chat-empty"><Icon name="send"/><strong>Cùng trao đổi bài học</strong><span>Gửi câu hỏi hoặc lời nhắn cho lớp.</span></div>}{chat.map((message,i)=><div className={`chat-entry ${message.username===user.username?'mine':''}`} key={i}><span className="avatar">{message.username.slice(0,2).toUpperCase()}</span><div><strong>{message.username===user.username?'Bạn':message.username}</strong><p>{message.text}</p></div></div>)}</div><form onSubmit={sendChat}><input aria-label="Tin nhắn lớp học" value={draft} onChange={e=>setDraft(e.target.value)} maxLength={500} placeholder="Nhập tin nhắn…"/><button className="ghost-button" title="Gửi" aria-label="Gửi" disabled={!connected||!draft.trim()}><Icon name="send"/></button></form></div>
       <aside className="meeting-sidebar" hidden={sidebarTab!=='people'}>
         {owned&&<section className="moderation-panel"><h3>Điều hành buổi học</h3><button className="ghost-button" disabled={!connected} onClick={()=>command('mic-lock',{locked:!controls?.microphonesLocked})}>{controls?.microphonesLocked?'Mở quyền mic cả lớp':'Khóa mic học viên cả lớp'}</button>{!!controls?.presenter&&<button className="ghost-button" onClick={()=>command('screen-revoke')}>Dừng người đang chia sẻ</button>}{controls?.participants.filter(p=>!p.owner).map(p=><div className="permission-row" key={p.peerId}><strong>{p.username}</strong><small>{p.micAllowed?'Được bật mic':'Mic bị khóa'}</small>{p.screenRequested&&<><button className="ghost-button" onClick={()=>command('screen-review',{peerId:p.peerId,approve:true})}>Duyệt chia sẻ</button><button className="ghost-button" onClick={()=>command('screen-review',{peerId:p.peerId,approve:false})}>Từ chối chia sẻ</button></>}{controls.microphonesLocked&&<button className="ghost-button" onClick={()=>command('mic-review',{peerId:p.peerId,approve:!p.micAllowed})}>{p.micAllowed?'Thu hồi quyền mic':p.micRequested?'Duyệt phát biểu':'Cho phép bật mic'}</button>}</div>)}</section>}
         <section className="room-members"><h3>Đang kết nối ({controls?.participants.length??0})</h3><p>Một tài khoản có thể có nhiều kết nối.</p>{controls?.participants.map(p=><div className="permission-row" key={p.peerId}><strong>{p.username}{p.peerId===controls.peerId?" (bạn)":""}</strong><small>{p.owner?"Chủ lớp":"Học viên"} · {controls.presenter===p.peerId?"Đang trình bày":p.micAllowed?"Được bật mic":"Mic bị khóa"}</small></div>)}</section><button type="button" className="ghost-button open-management" onClick={onManage}>Danh sách & quản lý lớp</button>
       </aside>
     </section>
-    <section className="session-information"><h3>Thông tin buổi học</h3><div className="session-info-grid"><div><Icon name="book"/><span><strong>{roomName}</strong><small>Người điều hành: {ownerName}</small></span></div><div><Icon name="users"/><span><strong>{controls?.participants.length??0} kết nối trong phòng</strong><small>{micOn?'Mic của bạn đang bật':'Mic của bạn đang tắt'} · {listening?'Loa đang bật':'Loa đang tắt'}</small></span></div></div><span className="connection-state" role="status"><i className={connected?'connected':''}/>{status}</span><details className="media-diagnostics"><summary>Thông tin kết nối âm thanh</summary><p>{diagnostics||'Thông tin sẽ cập nhật sau vài giây.'}</p></details></section>
+    <section className="session-information"><h2>Thông tin buổi học</h2><div className="session-info-grid"><div><Icon name="book"/><span><strong>{roomName}</strong><small>Người điều hành: {ownerName}</small></span></div><div><Icon name="users"/><span><strong>{controls?.participants.length??0} kết nối trong phòng</strong><small>{micOn?'Mic của bạn đang bật':'Mic của bạn đang tắt'} · {listening?'Loa đang bật':'Loa đang tắt'}</small></span></div></div><span className="connection-state" role="status"><i className={connected?'connected':''}/>{status}</span><details className="media-diagnostics"><summary>Thông tin kết nối âm thanh</summary><p>{diagnostics||'Thông tin sẽ cập nhật sau vài giây.'}</p></details></section>
     <div className="learning-note"><Icon name="book"/><p>Mỗi câu hỏi mở ra<br/>một điều mới để học.</p><span>CLASSROOM · PBL4</span></div>
   </div>;
 }

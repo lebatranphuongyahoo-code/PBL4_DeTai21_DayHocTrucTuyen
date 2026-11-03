@@ -44,4 +44,17 @@ class ApiTest {
         mvc.perform(post("/api/auth/register").contentType("application/json").content("{\"username\":\"teacher\",\"displayName\":\"Teacher\",\"password\":\"Strong!23\",\"role\":\"TEACHER\"}")).andExpect(status().isBadRequest()).andExpect(jsonPath("$.errors.role").exists());
         mvc.perform(post("/api/auth/register").contentType("application/json").content("{broken")).andExpect(status().isBadRequest());
     }
+    @Test void restoreCookieDoesNotAuthorizeWritesAndLogoutRevokesIt() throws Exception {
+        String username="restore"+System.nanoTime();auth.register(new AuthService.Registration(username,"Restore User","Strong!23",null));
+        var reply=mvc.perform(post("/api/auth/login").contentType("application/json").content("{\"username\":\""+username+"\",\"password\":\"Strong!23\"}"))
+            .andExpect(status().isOk()).andReturn();
+        String header=reply.getResponse().getHeader("Set-Cookie");org.junit.jupiter.api.Assertions.assertTrue(header.contains("HttpOnly"));org.junit.jupiter.api.Assertions.assertTrue(header.contains("SameSite=Strict"));
+        String token=new com.fasterxml.jackson.databind.ObjectMapper().readTree(reply.getResponse().getContentAsString()).get("token").asText();
+        var cookie=new jakarta.servlet.http.Cookie("pbl4_restore",token);
+        mvc.perform(get("/api/auth/session").cookie(cookie)).andExpect(status().isOk()).andExpect(jsonPath("$.user.username").value(username));
+        mvc.perform(post("/api/rooms").cookie(cookie).contentType("application/json").content("{\"name\":\"Forbidden room\"}")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/rooms").cookie(cookie)).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/auth/logout").header("Authorization","Bearer "+token)).andExpect(status().isOk()).andExpect(header().string("Set-Cookie",org.hamcrest.Matchers.containsString("Max-Age=0")));
+        mvc.perform(get("/api/auth/session").cookie(cookie)).andExpect(status().isUnauthorized());
+    }
 }

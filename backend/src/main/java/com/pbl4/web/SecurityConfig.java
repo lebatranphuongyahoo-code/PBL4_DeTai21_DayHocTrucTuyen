@@ -23,7 +23,7 @@ public class SecurityConfig {
         // Only Authorization bearer headers authenticate requests; cookies are never credentials.
         return http.csrf(c -> c.disable()).sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .formLogin(c -> c.disable()).httpBasic(c -> c.disable()).logout(c -> c.disable())
-            .authorizeHttpRequests(a -> a.requestMatchers("/","/index.html","/styles.css","/assets/**","/audio-capture.js","/favicon.ico","/error","/api/health","/api/auth/register","/api/auth/login","/ws/classroom").permitAll().anyRequest().authenticated())
+            .authorizeHttpRequests(a -> a.requestMatchers("/","/index.html","/styles.css","/assets/**","/audio-capture.js","/favicon.ico","/error","/api/health","/api/auth/register","/api/auth/login","/api/auth/session","/ws/classroom").permitAll().anyRequest().authenticated())
             .exceptionHandling(e -> e.authenticationEntryPoint((req,res,error) -> {
                 res.setStatus(401); res.setContentType("application/json;charset=UTF-8"); res.getWriter().write("{\"ok\":false,\"message\":\"Cần đăng nhập để tiếp tục.\"}");
             }))

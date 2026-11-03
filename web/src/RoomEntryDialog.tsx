@@ -1,0 +1,6 @@
+import React, { useEffect, useRef, useState } from 'react';
+export function RoomEntryDialog({ teacher,busy,message,onClose,onSubmit }: { teacher:boolean;busy:boolean;message:string;onClose:()=>void;onSubmit:(value:string)=>void }) {
+  const ref=useRef<HTMLDialogElement>(null); const [value,setValue]=useState('');
+  useEffect(()=>{const dialog=ref.current;dialog?.showModal();return()=>dialog?.close();},[]);
+  return <dialog ref={ref} className="room-entry-dialog" aria-labelledby="room-entry-title" onCancel={onClose}><div className="section-heading"><h2 id="room-entry-title">{teacher?'Tạo lớp học':'Xin tham gia lớp'}</h2><button type="button" className="ghost-button" onClick={onClose}>Đóng</button></div><p>{teacher?'Đặt tên lớp để bắt đầu. Sau khi tạo, bạn có thể mời học viên và vào phòng học.':'Nhập mã do chủ lớp gửi. Bạn được vào lớp sau khi chủ lớp duyệt.'}</p><form onSubmit={e=>{e.preventDefault();onSubmit(value.trim());}}><label>{teacher?'Tên lớp':'Mã lớp'}<input name={teacher?'name':'code'} autoFocus required minLength={teacher?2:1} maxLength={teacher?100:12} value={value} onChange={e=>setValue(e.target.value)} disabled={busy}/></label><button type="submit" className="primary-button" disabled={busy||!value.trim()}>{busy?'Đang xử lý…':teacher?'Tạo lớp':'Gửi yêu cầu'}</button></form><p role="alert">{message}</p></dialog>;
+}
