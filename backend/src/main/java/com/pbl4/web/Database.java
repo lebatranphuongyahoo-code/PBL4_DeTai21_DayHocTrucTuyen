@@ -16,6 +16,13 @@ public class Database {
     public record Account(long id, String username, String displayName, String passwordHash, String role) {}
     public record Classroom(long id, String name, int members) {}
     private final Connection connection;
+    @FunctionalInterface interface Transaction<T> { T execute(Connection connection) throws SQLException; }
+    synchronized <T> T transaction(Transaction<T> work) throws SQLException {
+        connection.setAutoCommit(false);
+        try { T result = work.execute(connection); connection.commit(); return result; }
+        catch (SQLException | RuntimeException e) { connection.rollback(); throw e; }
+        finally { connection.setAutoCommit(true); }
+    }
 
     public Database(@Value("${app.database}") String path) throws Exception {
         Path target = Path.of(path).toAbsolutePath().normalize();

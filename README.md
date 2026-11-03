@@ -1,5 +1,12 @@
 # PBL4 · Đề tài 21 — Dạy học trực tuyến
 
+## Bản web trên nhánh web-rebuild
+
+Người dùng đã chọn kiến trúc React/TypeScript + Java Spring Boot + SQLite riêng.
+Xem [hướng dẫn chạy, nghiệp vụ và nghiệm thu media](docs/WEB_MEDIA_DEMO.md).
+Build bằng scripts/build-web.ps1; JAR Java chứa UI React và API/WebSocket.
+Phần tài liệu Swing dưới đây mô tả hệ thống cũ, không chứng minh bản web hoàn tất.
+
 **Nhóm 4 · Hệ điều hành & Mạng máy tính · Đại học Bách khoa Đà Nẵng**
 
 Phần việc trong repo này chia làm 3 khối, mỗi người sở hữu một khối:

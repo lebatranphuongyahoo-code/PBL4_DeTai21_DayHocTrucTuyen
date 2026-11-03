@@ -43,3 +43,11 @@ Username 3–32 ký tự, bắt đầu chữ ASCII; chữ, số, _. Họ tên 2�
 Backend `mvn verify`: 3 JUnit tests, 0 lỗi; gồm nhiều trường hợp password, role injection, collision, persistence/reopen, session revoke/expiry, membership, legacy guard và HTTP unauthorized. React `npm run build`: pass. Chromium trên Windows: đăng ký yếu bị từ chối, đăng ký hợp lệ, đăng nhập, lớp rỗng, mobile không tràn ngang, logout, không pageerror. Test browser chạy bằng script tạm; ảnh trong web/test (gitignored).
 
 Baseline Swing `mvn -o verify`: 61 tests, 0 lỗi; T0Scenario 20/20. Chưa kiểm thử mic/screen Windows bản web, chưa load/concurrency backend web. Chưa có rate limit login hoặc bảo vệ triển khai public; HTTP localhost chỉ dành phát triển. Không tuyên bố hoàn thiện đề 21.
+
+## Cập nhật mốc lớp học/media, 03/11/2026
+
+Người dùng đã ủy quyền lựa chọn nghiệp vụ: operator cấp TEACHER; public register STUDENT; giáo viên thêm theo username hoặc duyệt mã lớp. Không cần admin GUI/hồ sơ xin cấp quyền để đáp ứng đề.
+
+ClassroomService/Controller đã triển khai tạo/thêm/duyệt/từ chối/xóa/rút/lưu trữ với SQLite transaction. MediaTicketService/MediaWebSocketHandler triển khai vé một lần, session/room revoke, relay server, executor gửi riêng và giới hạn queue. React ClassroomMedia có screen window/tab, stop/end, mic/loa độc lập và chat. Prototype relay PCM/JPEG qua WebSocket TCP; chưa có SFU, chưa đo chất lượng mạng thật.
+
+6 backend tests đạt (gồm socket thật và hai nguồn audio đồng thời); build React đạt; Chromium headless đạt luồng lớp/duyệt và pipeline giả lập media, không pageerror. JAR chứa UI được đóng gói. Chi tiết, cách chạy HTTPS/LAN và bảng nghiệm thu chưa xác minh ở WEB_MEDIA_DEMO.md. Các dòng trạng thái mốc 1 ở trên giữ làm lịch sử; không dùng làm mô tả trạng thái hiện tại.

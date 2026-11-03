@@ -1,19 +1,19 @@
 package com.pbl4.web;
 
 import java.nio.file.Path;
+import java.util.UUID;
 import java.sql.DriverManager;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FoundationTest {
-    @TempDir Path temporary;
+    private Path temporary() { return Path.of("target", "test-db-" + UUID.randomUUID()); }
     @Test void strongCredentialsPersistAndPublicRolesCannotEscalate() throws Exception {
-        String path=temporary.resolve("auth.db").toString();
+        String path=temporary().resolve("auth.db").toString();
         var db=new Database(path); var auth=new AuthService(db);
-        for (String password : new String[]{"short","abcdefgh!1","ABCDEFGH!1","StrongPassword!","StrongPassword1","Strong123 ","Aa1!".repeat(19)})
+        for (String password : new String[]{"short","abcdefgh!1","ABCDEFGH!1","StrongPassword!","StrongPassword1","Strong123 ","Aa1!".repeat(19),"Strong!23\u0000"})
             assertEquals(400,assertThrows(AuthService.Failure.class,()->auth.register(new AuthService.Registration("learner","Nguyễn An",password,null))).status);
         for(String role:new String[]{"TEACHER","ADMIN"})
             assertTrue(assertThrows(AuthService.Failure.class,()->auth.register(new AuthService.Registration("learner","Nguyễn An","Strong!23",role))).errors.containsKey("role"));
@@ -34,7 +34,8 @@ class FoundationTest {
         reopened.close();
     }
     @Test void expiryMembershipAndLegacyGuardAreEnforced() throws Exception {
-        String path=temporary.resolve("members.db").toString();
+        Path folder=temporary();
+        String path=folder.resolve("members.db").toString();
         var db=new Database(path); var auth=new AuthService(db);
         auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
         auth.register(new AuthService.Registration("learner","Learner","Strong!23",null));
@@ -47,7 +48,7 @@ class FoundationTest {
             assertEquals(1,db.listClassrooms(learner).size());
         }
         db.close();
-        String legacy=temporary.resolve("legacy.db").toString();
+        String legacy=folder.resolve("legacy.db").toString();
         try(var connection=DriverManager.getConnection("jdbc:sqlite:"+legacy); var s=connection.createStatement()) { s.execute("CREATE TABLE Users(username TEXT)"); }
         assertThrows(IllegalStateException.class,()->new Database(legacy));
     }

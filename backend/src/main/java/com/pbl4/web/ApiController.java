@@ -9,8 +9,8 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api")
 public class ApiController {
-    private final AuthService auth; private final Database db;
-    public ApiController(AuthService auth, Database db) { this.auth=auth; this.db=db; }
+    private final AuthService auth; private final Database db; private final MediaTicketService mediaTickets;
+    public ApiController(AuthService auth, Database db, MediaTicketService mediaTickets) { this.auth=auth; this.db=db; this.mediaTickets=mediaTickets; }
     @GetMapping("/health") public Map<String,Object> health() { return Map.of("ok",true,"service","classroom-java","phase","foundation"); }
     @PostMapping("/auth/register") public ResponseEntity<?> register(@RequestBody AuthService.Registration input) throws SQLException {
         return ResponseEntity.status(201).body(Map.of("ok",true,"user",auth.register(input)));
@@ -18,6 +18,7 @@ public class ApiController {
     @PostMapping("/auth/login") public Map<String,Object> login(@RequestBody AuthService.Login input) throws SQLException {
         var session=auth.login(input); return Map.of("ok",true,"user",session.user(),"token",session.token());
     }
+    @PostMapping("/media/ticket") public Map<String,Object> mediaTicket(Authentication identity,@RequestHeader("Authorization") String authorization) { return Map.of("ok",true,"ticket",mediaTickets.issue(AuthService.tokenHash(authorization.substring(7)))); }
     @GetMapping("/me") public Map<String,Object> me(Authentication identity) {
         return Map.of("ok",true,"user",AuthService.publicUser((Database.Account)identity.getPrincipal()));
     }

@@ -33,7 +33,7 @@ public class AuthService {
         var errors = new LinkedHashMap<String,String>();
         if (!username.matches("[A-Za-z][A-Za-z0-9_]{2,31}")) errors.put("username","Tên tài khoản cần 3–32 ký tự, bắt đầu bằng chữ, chỉ gồm chữ không dấu, số và _.");
         if (displayName.length()<2 || displayName.length()>80 || displayName.codePoints().anyMatch(Character::isISOControl)) errors.put("displayName","Họ tên cần 2–80 ký tự.");
-        if (password.length()<8 || password.getBytes(StandardCharsets.UTF_8).length>72 || !password.matches("(?s).*[A-Z].*") || !password.matches("(?s).*[a-z].*") || !password.matches("(?s).*[0-9].*") || password.codePoints().noneMatch(c -> !Character.isLetterOrDigit(c) && !Character.isWhitespace(c)))
+        if (password.length()<8 || password.getBytes(StandardCharsets.UTF_8).length>72 || password.codePoints().anyMatch(Character::isISOControl) || !password.matches("(?s).*[A-Z].*") || !password.matches("(?s).*[a-z].*") || !password.matches("(?s).*[0-9].*") || password.codePoints().noneMatch(c -> !Character.isLetterOrDigit(c) && !Character.isWhitespace(c)))
             errors.put("password","Mật khẩu cần ít nhất 8 ký tự, tối đa 72 byte UTF-8, có chữ hoa A–Z, chữ thường a–z, số và ký tự đặc biệt.");
         if (input.role()!=null && !input.role().equals("STUDENT")) errors.put("role","Không được tự cấp quyền giáo viên hoặc quản trị viên.");
         if (!errors.isEmpty()) throw new Failure(400,"Kiểm tra lại thông tin đăng ký.",errors);
