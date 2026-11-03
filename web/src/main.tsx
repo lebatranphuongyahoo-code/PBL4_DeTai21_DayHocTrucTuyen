@@ -14,6 +14,7 @@ function App() {
   const [busy, setBusy] = useState(false);
   const [restoring,setRestoring]=useState(true);
   useEffect(()=>{let active=true;void api('/auth/session').then(async reply=>{if(!reply.user||!reply.token)return;const list=await api('/rooms','GET',undefined,reply.token);if(active){setRooms(list.rooms??[]);setUser(reply.user);setToken(reply.token);}}).catch(error=>{if(active&&!(error instanceof Error&&error.message.includes('Phiên đã hết hạn')))setMessage('Không khôi phục được phiên. Bạn có thể đăng nhập lại.');}).finally(()=>{if(active)setRestoring(false);});return()=>{active=false;};},[]);
+  useEffect(()=>{const expire=()=>{setUser(null);setToken('');setRooms([]);setMessage('Phiên đã hết hạn hoặc bị thu hồi. Hãy đăng nhập lại.');};window.addEventListener('pbl4-session-expired',expire);return()=>window.removeEventListener('pbl4-session-expired',expire);},[]);
   const register = mode === 'register';
   function switchMode(next: 'login'|'register') { if (!busy) { setMode(next); setMessage(''); setSuccess(false); } }
   async function submit(event: React.FormEvent<HTMLFormElement>) {

@@ -50,6 +50,9 @@ public class Database {
                     }
                     s.executeUpdate("INSERT INTO schema_versions VALUES (1, strftime('%s','now'))");
                 }
+                s.execute("CREATE TABLE IF NOT EXISTS classroom_meetings(classroom_id INTEGER PRIMARY KEY REFERENCES classrooms(id) ON DELETE CASCADE, is_open INTEGER NOT NULL DEFAULT 1 CHECK(is_open IN (0,1)))");
+                s.execute("INSERT OR IGNORE INTO classroom_meetings(classroom_id) SELECT id FROM classrooms");
+                s.execute("INSERT OR IGNORE INTO schema_versions VALUES(2,strftime('%s','now'))");
                 opened.commit();
             } catch (Exception e) { opened.rollback(); throw e; }
             opened.setAutoCommit(true);

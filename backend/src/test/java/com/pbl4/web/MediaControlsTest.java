@@ -4,6 +4,12 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MediaControlsTest {
+    @Test void individualBlockOverridesOpenClassAndGrant() {
+        var state=new MediaControls();state.microphoneBlocks.add("one");
+        assertFalse(state.microphoneAllowed("one",false));assertTrue(state.microphoneAllowed("two",false));
+        state.microphoneGrants.add("one");assertFalse(state.microphoneAllowed("one",false));
+        assertTrue(state.microphoneAllowed("one",true));state.remove("one");assertTrue(state.microphoneAllowed("one",false));
+    }
     @Test void grantsExpireWithConnectionWhileRoomLockRemains() {
         var state=new MediaControls();
         assertTrue(state.microphoneAllowed("learner",false));

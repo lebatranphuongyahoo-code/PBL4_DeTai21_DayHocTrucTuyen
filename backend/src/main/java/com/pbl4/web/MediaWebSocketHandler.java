@@ -83,7 +83,7 @@ public class MediaWebSocketHandler extends BinaryWebSocketHandler {
                     synchronized(state){if(state.presenter.equals(peer.socket.getId())){state.presenter="";broadcast(peer.room,Map.of("type","screen-stop"));publishControls(peer.room);}}
                 }
             }
-        } catch(AuthService.Failure denied){disconnect(peer);}
+        } catch(AuthService.Failure denied){if(denied.getMessage().startsWith("Buổi học đã kết thúc"))disconnect(peer,new CloseStatus(4000,"meeting-ended"));else disconnect(peer);}
         catch(IOException|IllegalArgumentException malformed){send(peer,text(Map.of("type","error","message","Dữ liệu không hợp lệ.")));}
         catch(java.sql.SQLException unavailable){disconnect(peer);}
     }
@@ -121,7 +121,7 @@ public class MediaWebSocketHandler extends BinaryWebSocketHandler {
     }
     private boolean valid(Peer peer) {
         if(peer.room==0)return false;
-        try {var user=tickets.current(peer.sessionHash);if(user!=null){rooms.mediaAccess(user,peer.room);return true;}}
+        try {if(!rooms.isMeetingOpen(peer.room)){disconnect(peer,new CloseStatus(4000,"meeting-ended"));return false;}var user=tickets.current(peer.sessionHash);if(user!=null){rooms.mediaAccess(user,peer.room);return true;}}
         catch(java.sql.SQLException|AuthService.Failure denied){ /* Revoke existing connections as well. */ }
         disconnect(peer);return false;
     }
@@ -136,7 +136,7 @@ public class MediaWebSocketHandler extends BinaryWebSocketHandler {
         });} catch(RejectedExecutionException slow){peer.queuedBytes.addAndGet(-bytes);disconnect(peer,new CloseStatus(1013,"slow-recipient"));}
     }
     private boolean control(Peer peer,String type,com.fasterxml.jackson.databind.JsonNode command) {
-        if(!java.util.Set.of("screen-request","screen-cancel","screen-start","screen-review","screen-revoke","mic-lock","mic-request","mic-review").contains(type))return false;
+        if(!java.util.Set.of("screen-request","screen-cancel","screen-start","screen-review","screen-revoke","mic-lock","mic-request","mic-review","mic-block","screen-grant").contains(type))return false;
         var state=controls.computeIfAbsent(peer.room,k->new MediaControls());
         synchronized(state) {
             String id=peer.socket.getId(), targetId=command.path("peerId").asText();
@@ -147,12 +147,14 @@ public class MediaWebSocketHandler extends BinaryWebSocketHandler {
             else if(type.equals("mic-request")){if(!state.microphoneAllowed(id,peer.owner))state.microphoneRequests.add(id);}
             else {
                 if(!peer.owner){send(peer,text(Map.of("type","error","message","Chỉ người dạy được quản lý quyền media.")));return true;}
-                if(type.equals("mic-lock")){state.microphonesLocked=command.path("locked").asBoolean();state.microphoneGrants.clear();state.microphoneRequests.clear();}
+                if(type.equals("mic-lock")){state.microphonesLocked=command.path("locked").asBoolean();state.microphoneGrants.clear();state.microphoneBlocks.clear();state.microphoneRequests.clear();}
                 else if(type.equals("screen-revoke")){state.presenter="";broadcast(peer.room,Map.of("type","screen-stop"));}
                 else if(target!=null&&target.room==peer.room&&!target.owner){
                     boolean approve=command.path("approve").asBoolean();
-                    if(type.equals("screen-review")){if(state.screenRequests.remove(targetId)&&approve){broadcast(peer.room,Map.of("type","screen-stop"));state.presenter=targetId;}}
-                    else if(type.equals("mic-review")){state.microphoneRequests.remove(targetId);if(approve)state.microphoneGrants.add(targetId);else state.microphoneGrants.remove(targetId);}
+                    if(type.equals("mic-block")){if(command.path("blocked").asBoolean()){state.microphoneBlocks.add(targetId);state.microphoneGrants.remove(targetId);}else state.microphoneBlocks.remove(targetId);}
+                    else if(type.equals("screen-grant")){broadcast(peer.room,Map.of("type","screen-stop"));state.presenter=targetId;state.screenRequests.remove(targetId);send(target,text(Map.of("type","notice","message","Chủ lớp đã mời bạn trình bày. Bấm Chia sẻ bài giảng để chọn nguồn.")));}
+                    else if(type.equals("screen-review")){if(state.screenRequests.remove(targetId)&&approve){broadcast(peer.room,Map.of("type","screen-stop"));state.presenter=targetId;}}
+                    else if(type.equals("mic-review")){state.microphoneRequests.remove(targetId);if(approve){state.microphoneBlocks.remove(targetId);state.microphoneGrants.add(targetId);}else state.microphoneGrants.remove(targetId);}
                 }
             }
             publishControls(peer.room);return true;
@@ -164,7 +166,7 @@ public class MediaWebSocketHandler extends BinaryWebSocketHandler {
             var participants=connections.values().stream().filter(p->p.room==room).map(p->Map.of(
                 "peerId",p.socket.getId(),"sourceId",Long.toString(p.sourceId),"username",p.username,"owner",p.owner,
                 "micAllowed",state.microphoneAllowed(p.socket.getId(),p.owner),"screenRequested",state.screenRequests.contains(p.socket.getId()),
-                "micRequested",state.microphoneRequests.contains(p.socket.getId()))).toList();
+                "micRequested",state.microphoneRequests.contains(p.socket.getId()),"micBlocked",state.microphoneBlocks.contains(p.socket.getId()))).toList();
             for(Peer peer:connections.values())if(peer.room==room)send(peer,text(Map.of("type","controls","peerId",peer.socket.getId(),
                 "presenter",state.presenter,"microphonesLocked",state.microphonesLocked,"participants",participants)));
         }
@@ -193,6 +195,7 @@ public class MediaWebSocketHandler extends BinaryWebSocketHandler {
         log.info("Media closed source={} room={} code={} reason={}",peer.sourceId,peer.room,status.getCode(),status.getReason());
         leave(peer);peer.sends.shutdownNow();close(peer.socket,status);
     }
+    public synchronized void endMeeting(long room){for(Peer peer:connections.values())if(peer.room==room)disconnect(peer,new CloseStatus(4000,"meeting-ended"));controls.remove(room);}
     @Scheduled(fixedDelay=1000) public synchronized void sweep() {
         for(Peer peer:connections.values())if(peer.room!=0)valid(peer);
         else if(tickets.current(peer.sessionHash)==null)disconnect(peer);

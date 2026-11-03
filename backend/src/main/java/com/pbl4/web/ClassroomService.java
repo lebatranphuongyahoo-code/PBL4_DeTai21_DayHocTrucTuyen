@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 /** Permission decisions and compound writes run in the same SQLite transaction. */
 @Service
 public class ClassroomService {
-    public record Detail(long id, String name, String owner, boolean owned, String inviteCode, List<Member> members) {}
+    public record Detail(long id, String name, String owner, boolean owned, String inviteCode, List<Member> members, boolean meetingOpen) {}
     public record Member(long id, String username, String displayName, String role) {}
     public record Request(long accountId, String username, String displayName, long requestedAt) {}
     public record JoinStatus(long roomId, String roomName, String status) {}
@@ -43,6 +43,7 @@ public class ClassroomService {
     /** Small access query used for every relay operation, including existing sockets. */
     public boolean mediaAccess(Database.Account user,long id) throws SQLException {
         return db.transaction(c->{Stored room=room(c,id);access(c,user,room);
+            if(!meetingOpen(c,id))throw invalid("Buổi học đã kết thúc. Chờ chủ lớp bắt đầu buổi mới.");
             return room.ownerId()==user.id();});
     }
     private Detail detail(Connection c,Database.Account user,Stored room) throws SQLException {
@@ -50,7 +51,7 @@ public class ClassroomService {
         try(var s=c.prepareStatement("SELECT a.id,a.username,a.display_name,a.role FROM accounts a WHERE a.id=? OR EXISTS(SELECT 1 FROM classroom_members m WHERE m.classroom_id=? AND m.account_id=a.id) ORDER BY a.display_name,a.id")) {
             s.setLong(1,room.ownerId());s.setLong(2,room.id());try(var r=s.executeQuery()){while(r.next()) members.add(new Member(r.getLong(1),r.getString(2),r.getString(3),r.getLong(1)==room.ownerId()?"OWNER":"MEMBER"));}
         }
-        return new Detail(room.id(),room.name(),room.owner(),room.ownerId()==user.id(),room.ownerId()==user.id()?room.invite():null,members);
+        return new Detail(room.id(),room.name(),room.owner(),room.ownerId()==user.id(),room.ownerId()==user.id()?room.invite():null,members,meetingOpen(c,room.id()));
     }
     public Detail create(Database.Account user,String name) throws SQLException {
         String clean=name==null?"":name.strip();
@@ -64,11 +65,15 @@ public class ClassroomService {
                 }
                 long id;
                 try(var s=c.createStatement();var r=s.executeQuery("SELECT last_insert_rowid()")){r.next();id=r.getLong(1);}
+                try(var meeting=c.prepareStatement("INSERT INTO classroom_meetings(classroom_id) VALUES(?)")){meeting.setLong(1,id);meeting.executeUpdate();}
                 return detail(c,user,room(c,id));
             }
             throw new SQLException("Invite allocation failed");
         });
     }
+    private boolean meetingOpen(Connection c,long id)throws SQLException {try(var s=c.prepareStatement("SELECT is_open FROM classroom_meetings WHERE classroom_id=?")){s.setLong(1,id);try(var r=s.executeQuery()){return !r.next()||r.getInt(1)==1;}}}
+    public void setMeeting(Database.Account user,long id,boolean open)throws SQLException {db.transaction(c->{owner(user,room(c,id));try(var s=c.prepareStatement("INSERT INTO classroom_meetings(classroom_id,is_open) VALUES(?,?) ON CONFLICT(classroom_id) DO UPDATE SET is_open=excluded.is_open")){s.setLong(1,id);s.setInt(2,open?1:0);s.executeUpdate();}return null;});}
+    public boolean isMeetingOpen(long id)throws SQLException {return db.transaction(c->meetingOpen(c,id));}
     public void add(Database.Account user,long id,String username) throws SQLException {
         db.transaction(c->{Stored room=room(c,id);owner(user,room);
             try(var s=c.prepareStatement("SELECT id FROM accounts WHERE username=? AND status='ACTIVE'")){
