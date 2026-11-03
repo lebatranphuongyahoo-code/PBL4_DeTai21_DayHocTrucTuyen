@@ -81,6 +81,38 @@ public final class Protocol {
         return ROLE_TEACHER.equals(role) || ROLE_STUDENT.equals(role);
     }
 
+    public static boolean isValidEmail(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        return value.matches("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+    }
+
+    public static boolean isValidPhone(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.replace(" ", "").replace("-", "");
+        if (!normalized.matches("^(\\+?\\d{9,15})$")) {
+            return false;
+        }
+        return normalized.length() >= 9 && normalized.length() <= 15;
+    }
+
+    public static String detectContactType(String contact) {
+        if (contact == null || contact.isBlank()) {
+            return null;
+        }
+        String trimmed = contact.trim();
+        if (isValidEmail(trimmed)) {
+            return "EMAIL";
+        }
+        if (isValidPhone(trimmed)) {
+            return "PHONE";
+        }
+        return null;
+    }
+
     // ===================== TIỆN ÍCH =====================
 
     /** Đọc {@code int} kiểu big-endian từ mảng byte tại vị trí offset (giống DataInputStream.writeInt). */

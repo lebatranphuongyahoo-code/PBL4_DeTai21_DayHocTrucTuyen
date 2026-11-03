@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Sổ quản lý các lớp học đang mở.
+ * Sổ quản lý các lớp đang có trạng thái hoạt động trong bộ nhớ.
  *
  * <p>Dùng {@link ConcurrentHashMap} chứ không dùng {@code HashMap}: nhiều luồng trong thread pool
  * cùng tra cứu và cùng tạo lớp. {@code HashMap} bị sửa đồng thời có thể hỏng cấu trúc bên trong
@@ -38,7 +38,8 @@ public class RoomManager {
     }
 
     /**
-     * Xoá lớp khỏi bộ nhớ nếu không còn ai.
+     * Xoá trạng thái lớp khỏi bộ nhớ nếu không còn ai. Thông tin lớp bền vững
+     * vẫn được giữ trong cơ sở dữ liệu để có thể mở lại sau.
      *
      * <p>Bắt buộc phải gọi khi người cuối cùng rời lớp. Nếu không, mở 100 lớp trong lúc test
      * là RAM phình lên mãi — đây chính là "rò rỉ bộ nhớ" mà hội đồng rất thích hỏi.</p>

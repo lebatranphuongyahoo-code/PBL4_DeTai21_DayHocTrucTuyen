@@ -46,9 +46,19 @@ public class DatabaseManager implements AutoCloseable {
                     CREATE TABLE IF NOT EXISTS Users (
                         username TEXT PRIMARY KEY,
                         password_hash TEXT NOT NULL,
+                        contact TEXT NOT NULL DEFAULT '',
+                        contact_type TEXT NOT NULL DEFAULT 'EMAIL',
                         role TEXT NOT NULL
                     )
                     """)) {
+                statement.executeUpdate();
+            }
+            removeUserColumn(opened, "full_name");
+            ensureUserColumn(opened, "contact", "TEXT NOT NULL DEFAULT ''");
+            ensureUserColumn(opened, "contact_type", "TEXT NOT NULL DEFAULT 'EMAIL'");
+            ensureUserColumn(opened, "display_name", "TEXT NOT NULL DEFAULT ''");
+            try (PreparedStatement statement = opened.prepareStatement(
+                    "UPDATE Users SET display_name = username WHERE display_name = ''")) {
                 statement.executeUpdate();
             }
             try (PreparedStatement statement = opened.prepareStatement(
@@ -81,11 +91,20 @@ public class DatabaseManager implements AutoCloseable {
      * @return {@code false} only when the username already exists
      */
     public synchronized boolean register(String user, String sha256Hex, String role) {
+        return register(user, sha256Hex, "", "EMAIL", role);
+    }
+
+    public synchronized boolean register(String user, String sha256Hex,
+                                        String contact, String contactType, String role) {
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO Users (username, password_hash, role) VALUES (?, ?, ?)")) {
+                "INSERT INTO Users (username, password_hash, contact, contact_type, role, display_name) "
+                        + "VALUES (?, ?, ?, ?, ?, ?)")) {
             statement.setString(1, user);
             statement.setString(2, sha256Hex);
-            statement.setString(3, role);
+            statement.setString(3, contact == null ? "" : contact.trim());
+            statement.setString(4, contactType == null || contactType.isBlank() ? "EMAIL" : contactType.trim().toUpperCase());
+            statement.setString(5, role);
+            statement.setString(6, user);
             statement.executeUpdate();
             return true;
         } catch (SQLException e) {
@@ -107,6 +126,33 @@ public class DatabaseManager implements AutoCloseable {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Cannot authenticate user", e);
+        }
+    }
+
+    public synchronized String getDisplayName(String user) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT display_name FROM Users WHERE username = ?")) {
+            statement.setString(1, user);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    return null;
+                }
+                String displayName = result.getString("display_name");
+                return displayName == null || displayName.isBlank() ? user : displayName;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot read display name", e);
+        }
+    }
+
+    public synchronized boolean updateDisplayName(String user, String displayName) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE Users SET display_name = ? WHERE username = ?")) {
+            statement.setString(1, displayName.trim());
+            statement.setString(2, user);
+            return statement.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot update display name", e);
         }
     }
 
@@ -133,7 +179,35 @@ public class DatabaseManager implements AutoCloseable {
                 + ROOM_ID_ATTEMPTS + " attempts");
     }
 
-    /** Returns saved rooms; {@code memberCount} is zero because online state is kept in memory. */
+    public synchronized RoomInfo findRoom(int roomId) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT room_id, name, teacher_user FROM Rooms WHERE room_id = ?")) {
+            statement.setInt(1, roomId);
+            try (ResultSet result = statement.executeQuery()) {
+                if (!result.next()) {
+                    return null;
+                }
+                return new RoomInfo(result.getInt("room_id"), result.getString("name"),
+                        result.getString("teacher_user"), 0);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot find room", e);
+        }
+    }
+
+    /** Deletes a persisted room only when requested by its owning teacher. */
+    public synchronized boolean deleteRoom(int roomId, String teacherUser) {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "DELETE FROM Rooms WHERE room_id = ? AND teacher_user = ?")) {
+            statement.setInt(1, roomId);
+            statement.setString(2, teacherUser);
+            return statement.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot delete room", e);
+        }
+    }
+
+    /** Returns saved rooms; online state is merged from RoomManager by the server. */
     public synchronized List<RoomInfo> listRooms() {
         List<RoomInfo> rooms = new ArrayList<>();
         try (PreparedStatement statement = connection.prepareStatement(
@@ -165,5 +239,45 @@ public class DatabaseManager implements AutoCloseable {
         return (exception.getErrorCode() & 0xFF) == SQLITE_CONSTRAINT
                 && exception.getMessage() != null
                 && exception.getMessage().contains(column);
+    }
+
+    private static void ensureUserColumn(Connection connection, String columnName, String definition) {
+        try (PreparedStatement statement = connection.prepareStatement("PRAGMA table_info(Users)")) {
+            try (ResultSet result = statement.executeQuery()) {
+                boolean exists = false;
+                while (result.next()) {
+                    if (columnName.equals(result.getString("name"))) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    try (PreparedStatement addColumn = connection.prepareStatement(
+                            "ALTER TABLE Users ADD COLUMN " + columnName + " " + definition)) {
+                        addColumn.executeUpdate();
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot ensure SQLite column " + columnName, e);
+        }
+    }
+
+    private static void removeUserColumn(Connection connection, String columnName) {
+        try (PreparedStatement statement = connection.prepareStatement("PRAGMA table_info(Users)")) {
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    if (columnName.equals(result.getString("name"))) {
+                        try (PreparedStatement dropColumn = connection.prepareStatement(
+                                "ALTER TABLE Users DROP COLUMN " + columnName)) {
+                            dropColumn.executeUpdate();
+                        }
+                        return;
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Cannot remove SQLite column " + columnName, e);
+        }
     }
 }

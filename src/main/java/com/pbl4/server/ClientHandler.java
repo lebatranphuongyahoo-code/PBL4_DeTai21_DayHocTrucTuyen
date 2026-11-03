@@ -69,6 +69,7 @@ public class ClientHandler implements Runnable {
 
     // ---------- Trạng thái phiên (chỉ luồng đọc ghi, writer chỉ đọc) ----------
     private volatile String username;
+    private volatile String displayName;
     private volatile String role;
     private volatile int roomId = -1;
     private volatile InetAddress udpAddress;
@@ -241,6 +242,10 @@ public class ClientHandler implements Runnable {
         return username;
     }
 
+    public String getDisplayName() {
+        return displayName == null || displayName.isBlank() ? username : displayName;
+    }
+
     public String getRole() {
         return role;
     }
@@ -274,8 +279,10 @@ public class ClientHandler implements Runnable {
 
             case PacketType.LOGIN_REQ -> handleLogin(packet);
             case PacketType.REGISTER_REQ -> handleRegister(packet);
+            case PacketType.UPDATE_DISPLAY_NAME_REQ -> handleUpdateDisplayName(packet);
 
             case PacketType.CREATE_ROOM_REQ -> handleCreateRoom(packet);
+            case PacketType.DELETE_ROOM_REQ -> handleDeleteRoom(packet);
             case PacketType.JOIN_ROOM_REQ -> handleJoinRoom(packet);
             case PacketType.LEAVE_ROOM_REQ -> handleLeaveRoom(packet);
             case PacketType.ROOM_LIST_REQ -> handleRoomList();
@@ -314,22 +321,71 @@ public class ClientHandler implements Runnable {
         }
 
         this.username = user;
+        this.displayName = db.getDisplayName(user);
         this.role = foundRole;
         sendControl(PacketType.LOGIN_RES, PacketUtils.buildPayload(o -> {
             o.writeByte(1);
             o.writeUTF("Dang nhap thanh cong");
             o.writeUTF(foundRole);
+            o.writeUTF(displayName == null ? user : displayName);
         }));
         log("dang nhap thanh cong: " + user + " (" + foundRole + ")");
+    }
+
+    private void handleUpdateDisplayName(Packet packet) throws IOException {
+        if (!requireLogin()) {
+            sendControl(PacketType.UPDATE_DISPLAY_NAME_RES, PacketUtils.buildPayload(output -> {
+                output.writeByte(0);
+                output.writeUTF("Ban chua dang nhap");
+                output.writeUTF("");
+            }));
+            return;
+        }
+
+        DataInputStream input = PacketUtils.payloadReader(packet.getPayload());
+        String requestedName = input.readUTF().trim();
+        if (requestedName.isEmpty() || requestedName.length() > 40) {
+            sendControl(PacketType.UPDATE_DISPLAY_NAME_RES, PacketUtils.buildPayload(output -> {
+                output.writeByte(0);
+                output.writeUTF("Ten hien thi phai co tu 1 den 40 ky tu");
+                output.writeUTF(getDisplayName());
+            }));
+            return;
+        }
+
+        boolean updated = db.updateDisplayName(username, requestedName);
+        if (updated) {
+            displayName = requestedName;
+            Room room = currentRoom();
+            if (room != null) {
+                room.broadcastUserList();
+            }
+        }
+        String responseMessage = updated ? "Da cap nhat ten hien thi" : "Khong cap nhat duoc ten hien thi";
+        sendControl(PacketType.UPDATE_DISPLAY_NAME_RES, PacketUtils.buildPayload(output -> {
+            output.writeByte(updated ? 1 : 0);
+            output.writeUTF(responseMessage);
+            output.writeUTF(getDisplayName());
+        }));
     }
 
     private void handleRegister(Packet packet) throws IOException {
         DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
         String user = r.readUTF();
         String hash = r.readUTF();
-        String requestedRole = r.readUTF();
+        String contactOrRole = r.readUTF();
+        String contact = "";
+        String contactType = "";
+        String requestedRole;
+        boolean legacyRegistration = r.available() == 0;
+        if (!legacyRegistration) {
+            contact = contactOrRole;
+            contactType = r.readUTF();
+            requestedRole = r.readUTF();
+        } else {
+            requestedRole = contactOrRole;
+        }
 
-        // Không tin client: role phải là một trong hai giá trị hợp lệ.
         if (!Protocol.isValidRole(requestedRole)) {
             sendControl(PacketType.REGISTER_RES, PacketUtils.buildPayload(o -> {
                 o.writeByte(0);
@@ -338,7 +394,29 @@ public class ClientHandler implements Runnable {
             return;
         }
 
-        boolean ok = db.register(user, hash, requestedRole);
+        boolean ok;
+        if (legacyRegistration) {
+            ok = db.register(user, hash, requestedRole);
+        } else {
+            if (contact == null || contact.isBlank()) {
+                sendControl(PacketType.REGISTER_RES, PacketUtils.buildPayload(o -> {
+                    o.writeByte(0);
+                    o.writeUTF("So dien thoai hoac email khong duoc de trong");
+                }));
+                return;
+            }
+
+            String validatedType = Protocol.detectContactType(contact);
+            if (validatedType == null || !contactType.equalsIgnoreCase(validatedType)) {
+                sendControl(PacketType.REGISTER_RES, PacketUtils.buildPayload(o -> {
+                    o.writeByte(0);
+                    o.writeUTF("So dien thoai hoac email khong hop le");
+                }));
+                return;
+            }
+            ok = db.register(user, hash, contact, validatedType, requestedRole);
+        }
+
         sendControl(PacketType.REGISTER_RES, PacketUtils.buildPayload(o -> {
             o.writeByte(ok ? 1 : 0);
             o.writeUTF(ok ? "Dang ky thanh cong" : "Ten dang nhap da ton tai");
@@ -363,9 +441,11 @@ public class ClientHandler implements Runnable {
             return;
         }
 
-        // Cơ sở dữ liệu cấp mã phòng, rồi TV1 mở lớp đó trong RAM.
-        int newRoomId = db.createRoom(roomName, username);
-        rooms.createRoom(newRoomId, roomName, username);
+        int newRoomId;
+        synchronized (rooms) {
+            newRoomId = db.createRoom(roomName, username);
+            rooms.createRoom(newRoomId, roomName, username);
+        }
 
         sendControl(PacketType.CREATE_ROOM_RES, PacketUtils.buildPayload(o -> {
             o.writeByte(1);
@@ -383,22 +463,45 @@ public class ClientHandler implements Runnable {
         int targetRoomId = r.readInt();
         int clientUdpPort = r.readInt();
 
-        Room room = rooms.get(targetRoomId);
-        if (room == null) {
-            sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
-                o.writeByte(0);
-                o.writeUTF("Lop khong ton tai hoac da dong");
-            }));
-            return;
+        Room room;
+        synchronized (rooms) {
+            RoomInfo roomInfo = db.findRoom(targetRoomId);
+            if (roomInfo == null) {
+                sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
+                    o.writeByte(0);
+                    o.writeUTF("Lop khong ton tai hoac da bi xoa");
+                }));
+                return;
+            }
+
+            boolean ownerTeacher = Protocol.ROLE_TEACHER.equals(role)
+                    && username.equals(roomInfo.teacherUsername());
+            if (Protocol.ROLE_TEACHER.equals(role) && !ownerTeacher) {
+                sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
+                    o.writeByte(0);
+                    o.writeUTF("Chi giao vien tao lop moi duoc mo lop nay");
+                }));
+                return;
+            }
+
+            // Mỗi client chỉ ở trong MỘT phòng tại một thời điểm (mục 1.5.4).
+            leaveCurrentRoom();
+
+            room = rooms.createRoom(roomInfo.roomId(), roomInfo.roomName(),
+                    roomInfo.teacherUsername());
+            if (!room.addMember(this)) {
+                rooms.removeIfEmpty(targetRoomId);
+                sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
+                    o.writeByte(0);
+                    o.writeUTF("Lop dang khoa. Vui long doi giao vien vao lop.");
+                }));
+                return;
+            }
+
+            this.roomId = targetRoomId;
+            this.udpAddress = socket.getInetAddress();
+            this.udpPort = clientUdpPort;
         }
-
-        // Mỗi client chỉ ở trong MỘT phòng tại một thời điểm (mục 1.5.4).
-        leaveCurrentRoom();
-
-        this.roomId = targetRoomId;
-        this.udpAddress = socket.getInetAddress();
-        this.udpPort = clientUdpPort;
-        room.addMember(this);
 
         sendControl(PacketType.JOIN_ROOM_RES, PacketUtils.buildPayload(o -> {
             o.writeByte(1);
@@ -411,6 +514,45 @@ public class ClientHandler implements Runnable {
         log("phat USER_LIST cho " + notified + " nguoi trong lop " + targetRoomId);
     }
 
+    private void handleDeleteRoom(Packet packet) throws IOException {
+        if (!requireLogin() || !requireTeacher()) {
+            return;
+        }
+        DataInputStream input = PacketUtils.payloadReader(packet.getPayload());
+        int targetRoomId = input.readInt();
+        String message;
+        boolean deleted = false;
+
+        synchronized (rooms) {
+            RoomInfo roomInfo = db.findRoom(targetRoomId);
+            if (roomInfo == null) {
+                message = "Lop khong ton tai hoac da bi xoa";
+            } else if (!username.equals(roomInfo.teacherUsername())) {
+                message = "Chi giao vien tao lop moi duoc xoa lop nay";
+            } else if (rooms.memberCount(targetRoomId) > 0) {
+                message = "Hay roi khoi lop truoc khi xoa";
+            } else {
+                deleted = db.deleteRoom(targetRoomId, username);
+                if (deleted) {
+                    rooms.removeIfEmpty(targetRoomId);
+                    message = "Da xoa lop " + roomInfo.roomName();
+                } else {
+                    message = "Khong the xoa lop";
+                }
+            }
+        }
+
+        boolean result = deleted;
+        String responseMessage = message;
+        sendControl(PacketType.DELETE_ROOM_RES, PacketUtils.buildPayload(output -> {
+            output.writeByte(result ? 1 : 0);
+            output.writeUTF(responseMessage);
+            output.writeInt(targetRoomId);
+        }));
+        log("xoa lop " + targetRoomId + " (" + username + ") -> "
+                + (deleted ? "OK" : message));
+    }
+
     private void handleLeaveRoom(Packet packet) throws IOException {
         DataInputStream r = PacketUtils.payloadReader(packet.getPayload());
         int targetRoomId = r.readInt();
@@ -421,7 +563,7 @@ public class ClientHandler implements Runnable {
         leaveCurrentRoom();
     }
 
-    /** Rời lớp hiện tại (nếu có), phát lại USER_LIST, và dọn lớp rỗng khỏi bộ nhớ. */
+    /** Rời lớp hiện tại; lớp học vẫn được giữ trong DB để mở lại sau này. */
     private void leaveCurrentRoom() {
         int current = roomId;
         if (current < 0) {
@@ -436,13 +578,22 @@ public class ClientHandler implements Runnable {
         if (room == null) {
             return;
         }
+        boolean wasTeacher = Protocol.ROLE_TEACHER.equals(role)
+                && username.equals(room.getTeacherUsername());
+        if (wasTeacher && room.isSharing()) {
+            room.setSharing(false);
+            room.broadcastControl(PacketType.SCREEN_STOP, PacketUtils.buildPayload(output -> {
+                output.writeInt(room.getRoomId());
+                output.writeUTF("Giao vien da roi lop");
+            }));
+        }
         if (room.removeMember(this)) {
             log("roi lop " + current + " (" + username + ")");
             room.broadcastUserList();
         }
         if (room.isEmpty()) {
             rooms.removeIfEmpty(current);
-            log("lop " + current + " khong con ai -> da xoa khoi bo nho");
+            log("lop " + current + " khong con thanh vien online; van duoc giu trong DB");
         }
     }
 
@@ -456,6 +607,8 @@ public class ClientHandler implements Runnable {
                 o.writeUTF(info.teacherUsername());
                 // Số người online lấy từ trạng thái RAM, không phải từ DB.
                 o.writeInt(rooms.memberCount(info.roomId()));
+                Room room = rooms.get(info.roomId());
+                o.writeBoolean(room != null && room.isTeacherPresent());
             }
         }));
     }

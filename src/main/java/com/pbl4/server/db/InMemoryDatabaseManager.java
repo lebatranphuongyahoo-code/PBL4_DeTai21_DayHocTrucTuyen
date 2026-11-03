@@ -22,6 +22,7 @@ public class InMemoryDatabaseManager extends DatabaseManager {
 
     /** username → "sha256Hex|role" */
     private final Map<String, String> users = new ConcurrentHashMap<>();
+    private final Map<String, String> displayNames = new ConcurrentHashMap<>();
 
     /** roomId → "roomName|teacherUser" */
     private final Map<Integer, String> rooms = new ConcurrentHashMap<>();
@@ -32,6 +33,8 @@ public class InMemoryDatabaseManager extends DatabaseManager {
         String hash = com.pbl4.common.Sha256.hex("123456");
         users.put("lan", hash + "|" + Protocol.ROLE_TEACHER);
         users.put("minh", hash + "|" + Protocol.ROLE_STUDENT);
+        displayNames.put("lan", "lan");
+        displayNames.put("minh", "minh");
     }
 
     @Override
@@ -40,17 +43,54 @@ public class InMemoryDatabaseManager extends DatabaseManager {
         if (rec == null) {
             return null;
         }
-        int bar = rec.indexOf('|');
-        String storedHash = rec.substring(0, bar);
-        return storedHash.equals(sha256Hex) ? rec.substring(bar + 1) : null;
+        int firstBar = rec.indexOf('|');
+        if (firstBar < 0) {
+            return null;
+        }
+        String storedHash = rec.substring(0, firstBar);
+        if (!storedHash.equals(sha256Hex)) {
+            return null;
+        }
+        int secondBar = rec.indexOf('|', firstBar + 1);
+        if (secondBar < 0) {
+            return rec.substring(firstBar + 1);
+        }
+        return rec.substring(firstBar + 1, secondBar);
     }
 
     @Override
     public boolean register(String user, String sha256Hex, String role) {
+        return register(user, sha256Hex, "", "EMAIL", role);
+    }
+
+    @Override
+    public boolean register(String user, String sha256Hex,
+                           String contact, String contactType, String role) {
         if (!Protocol.isValidRole(role)) {
             return false;
         }
-        return users.putIfAbsent(user, sha256Hex + "|" + role) == null;
+        String payload = sha256Hex + "|" + role + "|"
+                + (contact == null ? "" : contact.trim()) + "|"
+                + (contactType == null || contactType.isBlank() ? "EMAIL" : contactType.trim().toUpperCase());
+        if (users.putIfAbsent(user, payload) != null) {
+            return false;
+        }
+        displayNames.put(user, user);
+        return true;
+    }
+
+    @Override
+    public String getDisplayName(String user) {
+        return users.containsKey(user) ? displayNames.getOrDefault(user, user) : null;
+    }
+
+    @Override
+    public boolean updateDisplayName(String user, String displayName) {
+        if (!users.containsKey(user)) {
+            return false;
+        }
+        displayNames.put(user, displayName.trim());
+        return true;
     }
 
     @Override
@@ -64,6 +104,29 @@ public class InMemoryDatabaseManager extends DatabaseManager {
             }
         }
         throw new IllegalStateException("Khong cap duoc roomId moi");
+    }
+
+    @Override
+    public RoomInfo findRoom(int roomId) {
+        String value = rooms.get(roomId);
+        if (value == null) {
+            return null;
+        }
+        String[] parts = value.split("\\|", 2);
+        return new RoomInfo(roomId, parts[0], parts.length > 1 ? parts[1] : "", 0);
+    }
+
+    @Override
+    public boolean deleteRoom(int roomId, String teacherUser) {
+        String value = rooms.get(roomId);
+        if (value == null) {
+            return false;
+        }
+        String[] parts = value.split("\\|", 2);
+        if (parts.length < 2 || !teacherUser.equals(parts[1])) {
+            return false;
+        }
+        return rooms.remove(roomId, value);
     }
 
     @Override

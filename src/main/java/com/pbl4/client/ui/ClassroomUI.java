@@ -27,7 +27,9 @@ import javax.swing.SwingUtilities;
 import java.awt.AWTException;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
@@ -69,6 +71,7 @@ public class ClassroomUI {
     private final String serverIp;
     private final int roomId;
     private final String role;
+    private final Runnable returnToHomeAction;
     private final JFrame frame;
     private final ScreenPanel screenPanel = new ScreenPanel();
     private final DefaultListModel<String> memberModel = new DefaultListModel<>();
@@ -85,26 +88,52 @@ public class ClassroomUI {
     private boolean micOn;
     private boolean sharing;
     private boolean inRoom = true;
+    private boolean returningToHome;
 
     public ClassroomUI(ServerConnection connection, String username, String role,
                        int roomId, String roomName, DatagramSocket audioSocket, String serverIp) {
         this(connection, username, role, roomId, roomName, audioSocket, serverIp,
-                createAudioPlayer(audioSocket), createAudioRecorder(audioSocket));
+                createAudioPlayer(audioSocket), createAudioRecorder(audioSocket), username, null);
+    }
+
+    public ClassroomUI(ServerConnection connection, String username, String role,
+                       int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
+                       Runnable returnToHomeAction) {
+        this(connection, username, role, roomId, roomName, audioSocket, serverIp,
+                createAudioPlayer(audioSocket), createAudioRecorder(audioSocket),
+                username, returnToHomeAction);
+    }
+
+    public ClassroomUI(ServerConnection connection, String username, String role,
+                       int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
+                       String displayName, Runnable returnToHomeAction) {
+        this(connection, username, role, roomId, roomName, audioSocket, serverIp,
+                createAudioPlayer(audioSocket), createAudioRecorder(audioSocket),
+                displayName, returnToHomeAction);
     }
 
     public ClassroomUI(ServerConnection connection, String username, String role,
                        int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
                        AudioPlayerControl audioPlayer, AudioRecorderControl audioRecorder) {
+        this(connection, username, role, roomId, roomName, audioSocket, serverIp,
+                audioPlayer, audioRecorder, username, null);
+    }
+
+    private ClassroomUI(ServerConnection connection, String username, String role,
+                        int roomId, String roomName, DatagramSocket audioSocket, String serverIp,
+                        AudioPlayerControl audioPlayer, AudioRecorderControl audioRecorder,
+                        String displayName, Runnable returnToHomeAction) {
         this.connection = Objects.requireNonNull(connection, "connection");
         this.audioSocket = audioSocket;
         this.roomId = roomId;
         this.role = Objects.requireNonNull(role, "role");
         this.serverIp = Objects.requireNonNull(serverIp, "serverIp");
+        this.returnToHomeAction = returnToHomeAction;
         this.audioPlayer = audioPlayer;
         this.audioRecorder = audioRecorder;
         this.frame = new JFrame("Lớp " + roomName + " (" + roomId + ")");
 
-        buildWindow(username);
+        buildWindow(displayName);
         connection.setListener(this::onPacket);
         connection.setDisconnectListener(cause -> SwingUtilities.invokeLater(() -> {
             inRoom = false;
@@ -167,41 +196,77 @@ public class ClassroomUI {
     }
 
     private void buildWindow(String username) {
-        JPanel membersPanel = new JPanel(new BorderLayout());
-        membersPanel.setBorder(BorderFactory.createTitledBorder("Thành viên"));
+        JPanel root = new JPanel(new BorderLayout(12, 12));
+        root.setBackground(new Color(240, 244, 255));
+        root.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+
+        JPanel membersPanel = new JPanel(new BorderLayout(8, 8));
+        membersPanel.setBackground(new Color(248, 250, 255));
+        membersPanel.setBorder(BorderFactory.createTitledBorder(
+                BorderFactory.createLineBorder(new Color(186, 208, 255), 1),
+                "Thành viên"));
         memberList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        memberList.setBackground(new Color(250, 252, 255));
+        memberList.setForeground(new Color(35, 46, 60));
+        memberList.setSelectionBackground(new Color(176, 210, 255));
+        memberList.setSelectionForeground(new Color(16, 31, 52));
         membersPanel.add(new JScrollPane(memberList), BorderLayout.CENTER);
-        membersPanel.setPreferredSize(new java.awt.Dimension(230, 0));
+        membersPanel.setPreferredSize(new Dimension(230, 0));
 
-        JPanel center = new JPanel(new BorderLayout(8, 8));
+        JPanel center = new JPanel(new BorderLayout(10, 10));
+        center.setBackground(new Color(240, 244, 255));
+        JLabel userBadge = new JLabel("Người dùng: " + username);
+        userBadge.setFont(new Font("SansSerif", Font.BOLD, 14));
+        userBadge.setForeground(new Color(24, 69, 120));
+        userBadge.setBorder(BorderFactory.createEmptyBorder(0, 4, 4, 0));
         center.add(screenPanel, BorderLayout.CENTER);
-        center.add(new JLabel("Người dùng: " + username), BorderLayout.NORTH);
+        center.add(userBadge, BorderLayout.NORTH);
 
-        JPanel controlBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+        JPanel controlBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 8));
+        controlBar.setOpaque(false);
         micButton.setEnabled(audioPlayer != null && audioRecorder != null);
-        controlBar.add(micButton);
+        styleButton(micButton, new Color(54, 117, 255), Color.WHITE);
         if (Protocol.ROLE_TEACHER.equals(role)) {
+            styleButton(shareButton, new Color(101, 71, 192), Color.WHITE);
             controlBar.add(shareButton);
         }
+        styleButton(leaveButton, new Color(201, 76, 76), Color.WHITE);
+        controlBar.add(micButton);
         controlBar.add(leaveButton);
 
-        JPanel chatPanel = new JPanel(new BorderLayout(4, 4));
+        JPanel chatPanel = new JPanel(new BorderLayout(6, 6));
+        chatPanel.setOpaque(false);
         chatArea.setEditable(false);
         chatArea.setLineWrap(true);
         chatArea.setWrapStyleWord(true);
+        chatArea.setBackground(new Color(249, 252, 255));
+        chatArea.setBorder(BorderFactory.createLineBorder(new Color(196, 210, 234), 1, true));
+        chatArea.setForeground(new Color(35, 46, 60));
+        chatInput.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(196, 210, 234), 1, true),
+                BorderFactory.createEmptyBorder(8, 10, 8, 10)));
+        chatInput.setBackground(new Color(249, 252, 255));
+        chatInput.setPreferredSize(new Dimension(0, 36));
         chatPanel.add(new JScrollPane(chatArea), BorderLayout.CENTER);
         chatPanel.add(chatInput, BorderLayout.SOUTH);
-        controlBar.add(chatPanel);
 
-        JPanel south = new JPanel(new BorderLayout());
-        south.add(controlBar, BorderLayout.CENTER);
+        JPanel south = new JPanel(new BorderLayout(8, 8));
+        south.setOpaque(false);
+        south.add(controlBar, BorderLayout.NORTH);
+        south.add(chatPanel, BorderLayout.CENTER);
+        statusLabel.setForeground(new Color(68, 83, 103));
+        statusLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
+        statusLabel.setBorder(BorderFactory.createEmptyBorder(8, 4, 0, 0));
         south.add(statusLabel, BorderLayout.SOUTH);
 
         frame.setLayout(new BorderLayout(8, 8));
-        frame.add(center, BorderLayout.CENTER);
-        frame.add(membersPanel, BorderLayout.EAST);
-        frame.add(south, BorderLayout.SOUTH);
+        frame.getContentPane().setBackground(new Color(240, 244, 255));
+        frame.add(root, BorderLayout.CENTER);
+        root.add(center, BorderLayout.CENTER);
+        root.add(membersPanel, BorderLayout.EAST);
+        root.add(south, BorderLayout.SOUTH);
         frame.setSize(1100, 700);
+        frame.setMinimumSize(new Dimension(760, 520));
         frame.setLocationRelativeTo(null);
         frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
         frame.addWindowListener(new WindowAdapter() {
@@ -217,9 +282,24 @@ public class ClassroomUI {
                 if (ClassroomUI.this.audioSocket != null) {
                     ClassroomUI.this.audioSocket.close();
                 }
-                ClassroomUI.this.connection.close();
+                if (returningToHome && returnToHomeAction != null) {
+                    returnToHomeAction.run();
+                } else {
+                    ClassroomUI.this.connection.close();
+                }
             }
         });
+    }
+
+    private void styleButton(JButton button, Color bg, Color textColor) {
+        button.setFocusPainted(false);
+        button.setBackground(bg);
+        button.setForeground(textColor);
+        button.setFont(new Font("SansSerif", Font.BOLD, 12));
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(bg.darker(), 1, true),
+                BorderFactory.createEmptyBorder(8, 12, 8, 12)));
+        button.setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
     }
 
     private void toggleMicrophone() {
@@ -372,6 +452,7 @@ public class ClassroomUI {
     private void leaveRoom() {
         sendLeaveRequest();
         inRoom = false;
+        returningToHome = true;
         frame.dispose();
     }
 
@@ -468,7 +549,10 @@ public class ClassroomUI {
             }
             List<String> members = new ArrayList<>(count);
             for (int i = 0; i < count; i++) {
-                members.add(input.readUTF() + " — " + input.readUTF());
+                String displayName = input.readUTF();
+                String role = input.readUTF();
+                String roleLabel = Protocol.ROLE_TEACHER.equals(role) ? "Giáo viên" : "Học sinh";
+                members.add(displayName + " - " + roleLabel);
             }
             return members;
         }

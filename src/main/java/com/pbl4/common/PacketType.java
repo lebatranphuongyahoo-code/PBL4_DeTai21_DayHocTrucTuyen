@@ -15,7 +15,7 @@ public final class PacketType {
 
     // ---------- Tài khoản (TV3 xử lý) ----------
     public static final byte LOGIN_REQ = 0x01;       // C→S: writeUTF(username), writeUTF(sha256Hex)
-    public static final byte LOGIN_RES = 0x02;       // S→C: writeByte(ok), writeUTF(msg), writeUTF(role)
+    public static final byte LOGIN_RES = 0x02;       // S→C: writeByte(ok), writeUTF(msg), writeUTF(role), writeUTF(displayName) on success
     public static final byte REGISTER_REQ = 0x03;    // C→S: writeUTF(username), writeUTF(sha256Hex), writeUTF(role)
     public static final byte REGISTER_RES = 0x04;    // S→C: writeByte(ok), writeUTF(msg)
 
@@ -26,8 +26,8 @@ public final class PacketType {
     public static final byte JOIN_ROOM_RES = 0x08;   // S→C: writeByte(ok), writeUTF(msg)
     public static final byte LEAVE_ROOM_REQ = 0x09;  // C→S: writeInt(roomId)
     public static final byte ROOM_LIST_REQ = 0x0A;   // C→S: payload rỗng
-    public static final byte ROOM_LIST_RES = 0x0B;   // S→C: writeInt(n), rồi n lần (roomId, roomName, teacher, soNguoi)
-    public static final byte USER_LIST = 0x0C;       // S→C: writeInt(n), rồi n lần (username, role)
+    public static final byte ROOM_LIST_RES = 0x0B;   // S→C: writeInt(n), rồi n lần (roomId, roomName, teacher, soNguoi, teacherPresent)
+    public static final byte USER_LIST = 0x0C;       // S→C: writeInt(n), rồi n lần (displayName, role)
     public static final byte CHAT_TEXT = 0x0D;       // 2 chiều: writeInt(roomId), writeUTF(text)
 
     // ---------- Màn hình (TV1 relay, TV2 nén/giải mã) ----------
@@ -38,6 +38,10 @@ public final class PacketType {
     // ---------- Mic (TV1 xử lý) ----------
     public static final byte AUDIO_ON = 0x13;        // C→S: writeInt(roomId)
     public static final byte AUDIO_OFF = 0x14;       // C→S: writeInt(roomId)
+    public static final byte DELETE_ROOM_REQ = 0x15; // C→S: writeInt(roomId)
+    public static final byte DELETE_ROOM_RES = 0x16; // S→C: writeByte(ok), writeUTF(msg), writeInt(roomId)
+    public static final byte UPDATE_DISPLAY_NAME_REQ = 0x17; // C→S: writeUTF(displayName)
+    public static final byte UPDATE_DISPLAY_NAME_RES = 0x18; // S→C: writeByte(ok), writeUTF(msg), writeUTF(displayName)
 
     // ---------- Lỗi ----------
     public static final byte ERROR = 0x7F;           // S→C: writeUTF(message)
@@ -63,6 +67,10 @@ public final class PacketType {
             case SCREEN_FRAME -> "SCREEN_FRAME";
             case AUDIO_ON -> "AUDIO_ON";
             case AUDIO_OFF -> "AUDIO_OFF";
+            case DELETE_ROOM_REQ -> "DELETE_ROOM_REQ";
+            case DELETE_ROOM_RES -> "DELETE_ROOM_RES";
+            case UPDATE_DISPLAY_NAME_REQ -> "UPDATE_DISPLAY_NAME_REQ";
+            case UPDATE_DISPLAY_NAME_RES -> "UPDATE_DISPLAY_NAME_RES";
             case ERROR -> "ERROR";
             default -> "UNKNOWN(0x" + String.format("%02X", type) + ")";
         };

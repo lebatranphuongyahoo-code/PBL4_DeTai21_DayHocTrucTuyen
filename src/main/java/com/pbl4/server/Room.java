@@ -2,6 +2,7 @@ package com.pbl4.server;
 
 import com.pbl4.common.PacketType;
 import com.pbl4.common.PacketUtils;
+import com.pbl4.common.Protocol;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -56,12 +57,26 @@ public class Room {
     // Thành viên
     // ==================================================================
 
-    public void addMember(ClientHandler handler) {
+    public boolean addMember(ClientHandler handler) {
         lock.lock();
         try {
+            boolean teacher = Protocol.ROLE_TEACHER.equals(handler.getRole());
+            if (teacher) {
+                if (!teacherUsername.equals(handler.getUsername())) {
+                    return false;
+                }
+            } else {
+                boolean teacherPresent = members.stream().anyMatch(member ->
+                        teacherUsername.equals(member.getUsername())
+                                && Protocol.ROLE_TEACHER.equals(member.getRole()));
+                if (!teacherPresent) {
+                    return false;
+                }
+            }
             if (!members.contains(handler)) {
                 members.add(handler);
             }
+            return true;
         } finally {
             lock.unlock();
         }
@@ -106,6 +121,17 @@ public class Room {
         return memberCount() == 0;
     }
 
+    public boolean isTeacherPresent() {
+        lock.lock();
+        try {
+            return members.stream().anyMatch(member ->
+                    teacherUsername.equals(member.getUsername())
+                            && Protocol.ROLE_TEACHER.equals(member.getRole()));
+        } finally {
+            lock.unlock();
+        }
+    }
+
     // ==================================================================
     // Broadcast — theo đúng 4 bước ở đầu lớp
     // ==================================================================
@@ -141,7 +167,7 @@ public class Room {
 
     /**
      * Dựng payload {@code USER_LIST} (0x0C) từ danh sách thành viên hiện tại.
-     * <p>Định dạng: {@code writeInt(n)}, rồi n lần {@code writeUTF(username)}, {@code writeUTF(role)}.</p>
+     * <p>Định dạng: {@code writeInt(n)}, rồi n lần {@code writeUTF(displayName)}, {@code writeUTF(role)}.</p>
      */
     public byte[] buildUserListPayload() {
         List<ClientHandler> targets = snapshotMembers();
@@ -154,7 +180,7 @@ public class Room {
         return PacketUtils.buildPayload(out -> {
             out.writeInt(loggedIn.size());
             for (ClientHandler c : loggedIn) {
-                out.writeUTF(c.getUsername());
+                out.writeUTF(c.getDisplayName());
                 out.writeUTF(c.getRole() == null ? "" : c.getRole());
             }
         });
