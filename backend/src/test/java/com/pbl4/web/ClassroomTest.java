@@ -20,9 +20,12 @@ class ClassroomTest {
             assertThrows(AuthService.Failure.class,()->rooms.detail(student,room.id()));
             assertThrows(AuthService.Failure.class,()->rooms.add(other,room.id(),"student"));
             rooms.requestJoin(student,room.inviteCode());rooms.requestJoin(student,room.inviteCode());
+            assertEquals("PENDING",rooms.myRequests(student).getFirst().status());
+            assertTrue(rooms.myRequests(other).isEmpty());
             assertEquals(1,rooms.requests(teacher,room.id()).size());
             assertThrows(AuthService.Failure.class,()->rooms.review(other,room.id(),student.id(),true));
             rooms.review(teacher,room.id(),student.id(),true);
+            assertEquals("APPROVED",rooms.myRequests(student).getFirst().status());
             assertNull(rooms.detail(student,room.id()).inviteCode());
             rooms.remove(teacher,room.id(),student.id());
             assertThrows(AuthService.Failure.class,()->rooms.detail(student,room.id()));
@@ -33,7 +36,12 @@ class ClassroomTest {
             }
             assertEquals(2,rooms.detail(teacher,room.id()).members().size());
             rooms.leave(student,room.id());
+            rooms.requestJoin(student,room.inviteCode());
+            rooms.review(teacher,room.id(),student.id(),false);
+            assertEquals("REJECTED",rooms.myRequests(student).getFirst().status());
+            assertThrows(AuthService.Failure.class,()->rooms.detail(student,room.id()));
             rooms.archive(teacher,room.id());
+            assertTrue(rooms.myRequests(student).isEmpty());
             assertTrue(db.listClassrooms(teacher.id()).isEmpty());
             assertThrows(AuthService.Failure.class,()->rooms.add(teacher,room.id(),"student"));
         } finally {db.close();}

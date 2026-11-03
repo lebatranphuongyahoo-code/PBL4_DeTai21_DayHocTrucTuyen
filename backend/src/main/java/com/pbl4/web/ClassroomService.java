@@ -11,6 +11,7 @@ public class ClassroomService {
     public record Detail(long id, String name, String owner, boolean owned, String inviteCode, List<Member> members) {}
     public record Member(long id, String username, String displayName, String role) {}
     public record Request(long accountId, String username, String displayName, long requestedAt) {}
+    public record JoinStatus(long roomId, String roomName, String status) {}
     private record Stored(long id, String name, long ownerId, String owner, String invite, String status) {}
     private final Database db;
     private final SecureRandom random = new SecureRandom();
@@ -118,6 +119,16 @@ public class ClassroomService {
             try(var s=c.prepareStatement("SELECT a.id,a.username,a.display_name,r.requested_at FROM join_requests r JOIN accounts a ON a.id=r.account_id WHERE r.classroom_id=? AND r.status='PENDING' AND a.status='ACTIVE' ORDER BY r.requested_at")){
                 s.setLong(1,id);try(var r=s.executeQuery()){while(r.next())requests.add(new Request(r.getLong(1),r.getString(2),r.getString(3),r.getLong(4)));}
             }return requests;
+        });
+    }
+    public List<JoinStatus> myRequests(Database.Account user) throws SQLException {
+        return db.transaction(c->{
+            var result = new ArrayList<JoinStatus>();
+            try(var s=c.prepareStatement("SELECT c.id,c.name,r.status FROM join_requests r JOIN classrooms c ON c.id=r.classroom_id WHERE r.account_id=? AND c.status='ACTIVE' ORDER BY r.requested_at DESC LIMIT 100")){
+                s.setLong(1,user.id());
+                try(var r=s.executeQuery()){while(r.next())result.add(new JoinStatus(r.getLong(1),r.getString(2),r.getString(3)));}
+            }
+            return result;
         });
     }
     public void review(Database.Account user,long id,long account,boolean approve)throws SQLException {

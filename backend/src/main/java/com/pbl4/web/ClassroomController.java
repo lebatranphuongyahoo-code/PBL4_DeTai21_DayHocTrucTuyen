@@ -22,6 +22,7 @@ public class ClassroomController {
     @PostMapping("/{id}/leave") public Map<String,Object> leave(Authentication a,@PathVariable long id)throws SQLException{rooms.leave(user(a),id);return Map.of("ok",true);}
     @PostMapping("/{id}/archive") public Map<String,Object> archive(Authentication a,@PathVariable long id)throws SQLException{rooms.archive(user(a),id);return Map.of("ok",true);}
     @PostMapping("/join-requests") public Map<String,Object> request(Authentication a,@RequestBody Join input)throws SQLException{rooms.requestJoin(user(a),input.code());return Map.of("ok",true);}
+    @GetMapping("/join-requests") public Map<String,Object> myRequests(Authentication a)throws SQLException{return Map.of("ok",true,"joinStatuses",rooms.myRequests(user(a)));}
     @GetMapping("/{id}/requests") public Map<String,Object> requests(Authentication a,@PathVariable long id)throws SQLException{return Map.of("ok",true,"requests",rooms.requests(user(a),id));}
     @PostMapping("/{id}/requests/{account}") public Map<String,Object> review(Authentication a,@PathVariable long id,@PathVariable long account,@RequestBody Review input)throws SQLException{rooms.review(user(a),id,account,input.approve());return Map.of("ok",true);}
 }

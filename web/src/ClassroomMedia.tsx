@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { api, User } from './api';
 
-type Props = { roomId: number; owned: boolean; token: string; user: User };
+type Props = { roomId: number; owned: boolean; token: string; user: User; management: React.ReactNode };
 type Playback = { context: AudioContext; times: Map<string, number>; sequences: Map<string, number> };
 type Participant = { peerId: string; sourceId: string; username: string; owner: boolean; micAllowed: boolean; screenRequested: boolean; micRequested: boolean };
 type Controls = { peerId: string; presenter: string; microphonesLocked: boolean; participants: Participant[] };
 const SCREEN = 1, AUDIO = 2;
 
-export function ClassroomMedia({ roomId, owned, token }: Props) {
+export function ClassroomMedia({ roomId, owned, token, user, management }: Props) {
   const socket = useRef<WebSocket | null>(null), generation = useRef(0);
   const screen = useRef<MediaStream | null>(null), frameTimer = useRef<number | undefined>(undefined);
   const microphone = useRef<MediaStream | null>(null), capture = useRef<AudioContext | null>(null);
@@ -57,7 +57,10 @@ export function ClassroomMedia({ roomId, owned, token }: Props) {
     const current = generation.current;
     if (playback.current?.context.state === 'running') return;
     if (playback.current && playback.current.context.state !== 'closed') {
-      await playback.current.context.resume(); setListening(true); return;
+      const existing = playback.current;
+      await existing.context.resume();
+      if (current === generation.current && playback.current === existing) setListening(existing.context.state === 'running');
+      return;
     }
     const context = new AudioContext();
     await context.resume();
@@ -182,7 +185,10 @@ export function ClassroomMedia({ roomId, owned, token }: Props) {
       setSharing(true); setStatus('Đang chia sẻ bài giảng.'); void nextFrame();
     } catch (error) {
       stream?.getTracks().forEach(t => t.stop());
-      setStatus(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Bạn đã hủy hoặc chưa cho phép chia sẻ.' : 'Không chia sẻ được. Hãy dùng Chrome/Edge trên HTTPS hoặc localhost.');
+      if (version === screenVersion.current) {
+        stopScreen();
+        setStatus(error instanceof DOMException && error.name === 'NotAllowedError' ? 'Bạn đã hủy hoặc chưa cho phép chia sẻ.' : 'Không chia sẻ được. Hãy dùng Chrome/Edge trên HTTPS hoặc localhost.');
+      }
     } finally { if (version === screenVersion.current) setShareBusy(false); }
   }
   async function startMic() {
@@ -191,9 +197,8 @@ export function ClassroomMedia({ roomId, owned, token }: Props) {
     let stream: MediaStream | undefined, context: AudioContext | undefined;
     try {
       // Resume playback during the user's click; microphone permission is independent.
-      const listeningPromise = listen();
+      await listen();
       stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
-      await listeningPromise;
       if (version !== micVersion.current) { stream.getTracks().forEach(t => t.stop()); return; }
       context = new AudioContext(); await context.audioWorklet.addModule('/audio-capture.js');
       if (version !== micVersion.current) { stream.getTracks().forEach(t => t.stop()); await context.close(); return; }
@@ -216,7 +221,11 @@ export function ClassroomMedia({ roomId, owned, token }: Props) {
       context.onstatechange = () => { if (capture.current === context && context?.state !== 'running') { stopMic(); setStatus('Mic bị trình duyệt tạm dừng. Bật mic lại để phục hồi.'); } };
       stream.getAudioTracks()[0].onended = stopMic;
       setMicOn(true); setStatus('Mic đang bật. Dùng tai nghe để tránh vọng âm.');
-    } catch { stream?.getTracks().forEach(t => t.stop()); if (context && context.state !== 'closed') void context.close(); setStatus('Không bật được mic. Kiểm tra quyền và thiết bị âm thanh.'); }
+    } catch {
+      stream?.getTracks().forEach(t => t.stop());
+      if (context && context.state !== 'closed') void context.close();
+      if (version === micVersion.current) { stopMic(); setStatus('Không bật được mic. Kiểm tra quyền và thiết bị âm thanh.'); }
+    }
     finally { if (version === micVersion.current) setMicBusy(false); }
   }
   function sendChat(event: React.FormEvent) {
@@ -224,6 +233,14 @@ export function ClassroomMedia({ roomId, owned, token }: Props) {
     if (text && connected && socket.current?.readyState === WebSocket.OPEN) { socket.current.send(JSON.stringify({ type: 'chat', text })); setDraft(''); }
   }
   return <div className="classroom-media">
+    <div className="participant-strip" aria-label="Người đang kết nối">
+      {controls?.participants.map(p => <div className={`participant-tile ${controls.presenter === p.peerId ? 'presenting' : ''}`} key={p.peerId}>
+        <span className="avatar">{p.username.slice(0, 2).toUpperCase()}</span>
+        <strong>{p.username}{p.peerId === controls.peerId ? ' (bạn)' : ''}</strong>
+        <small>{p.owner ? 'Chủ lớp' : 'Thành viên'} · {controls.presenter === p.peerId ? 'Trình bày' : 'Đã kết nối'}</small>
+      </div>)}
+      {!controls?.participants.length && <div className="participant-tile"><span className="avatar">{user.displayName.slice(0, 2).toUpperCase()}</span><strong>{user.displayName}</strong><small>Đang kết nối…</small></div>}
+    </div>
     <div className="media-controls">
       <span className="connection-state" role="status"><i className={connected ? 'connected' : ''} />{status}</span>
       {!connected && <button className="ghost-button" onClick={() => setAttempt(x => x + 1)}>Kết nối lại</button>}
@@ -233,18 +250,21 @@ export function ClassroomMedia({ roomId, owned, token }: Props) {
       {!canSpeak && <button className="ghost-button" disabled={!connected || me?.micRequested} onClick={() => command('mic-request')}>{me?.micRequested ? 'Đang chờ cho phép phát biểu' : 'Xin phát biểu'}</button>}
       <button className="ghost-button" disabled={!connected} aria-pressed={listening} onClick={() => listening ? stopListening() : void listen().catch(() => setStatus('Không mở được loa.'))}>{listening ? 'Tắt loa' : 'Bật loa'}</button>
     </div>
-    <p className="password-hint" aria-live="polite">{diagnostics}</p>
-    {owned && <section className="media-panel"><h3>Điều hành buổi học</h3>
+    <details className="media-diagnostics"><summary>Thông tin kết nối âm thanh</summary><p>{diagnostics || 'Thông tin sẽ cập nhật sau vài giây.'}</p></details>
+    <aside className="meeting-sidebar">
+    {owned && <section className="media-panel moderation-panel"><h3>Điều hành buổi học</h3>
       <button className="ghost-button" disabled={!connected} onClick={() => command('mic-lock', { locked: !controls?.microphonesLocked })}>{controls?.microphonesLocked ? 'Mở quyền mic cả lớp' : 'Khóa mic học viên cả lớp'}</button>
       {!!controls?.presenter && <button className="ghost-button" onClick={() => command('screen-revoke')}>Dừng người đang chia sẻ</button>}
-      {controls?.participants.filter(p => !p.owner).map(p => <p key={p.peerId}><strong>{p.username}</strong> · {p.micAllowed ? 'Được bật mic' : 'Mic bị khóa'} · {controls.presenter === p.peerId ? 'Có quyền chia sẻ' : 'Chưa được chia sẻ'}
+      {controls?.participants.filter(p => !p.owner).map(p => <div className="permission-row" key={p.peerId}><strong>{p.username}</strong><small>{p.micAllowed ? 'Được bật mic' : 'Mic bị khóa'} · {controls.presenter === p.peerId ? 'Có quyền chia sẻ' : 'Chưa được chia sẻ'}</small>
         {p.screenRequested && <><button className="ghost-button" onClick={() => command('screen-review', { peerId: p.peerId, approve: true })}>Duyệt chia sẻ</button><button className="ghost-button" onClick={() => command('screen-review', { peerId: p.peerId, approve: false })}>Từ chối chia sẻ</button></>}
         {controls.microphonesLocked && <button className="ghost-button" onClick={() => command('mic-review', { peerId: p.peerId, approve: !p.micAllowed })}>{p.micAllowed ? 'Thu hồi quyền mic' : p.micRequested ? 'Duyệt phát biểu' : 'Cho phép bật mic'}</button>}
-      </p>)}
+      </div>)}
       <p className="password-hint">Mở quyền mic không tự bật micro của học viên. Mỗi người tự chọn bật mic và nguồn chia sẻ. Quyền cấp riêng hết hiệu lực khi người đó rời phòng.</p>
     </section>}
+    <details className="class-management"><summary>Danh sách & quản lý lớp</summary>{management}</details>
+    </aside>
     <div className="media-grid">
-      <section className="media-panel"><h3>Bài giảng trực tiếp</h3>
+      <section className="media-panel lecture-panel"><div className="stage-heading"><h3>Bài giảng trực tiếp</h3><span>{sharing || image ? 'Đang trình bày' : 'Chờ chia sẻ'}</span></div>
         <div className="screen-placeholder">{image && !sharing ? <img className="shared-screen" src={image} alt="Màn hình đang được chia sẻ" /> : <div><span className="stage-symbol">▣</span><strong>{sharing ? 'Bài giảng đang được chia sẻ' : owned ? 'Sẵn sàng cho buổi học' : 'Đang chờ người trình bày chia sẻ'}</strong><p>{owned ? 'Chọn cửa sổ hoặc tab tài liệu. Bản xem trước được ẩn để tránh phản chiếu.' : 'Bật loa để nghe bài giảng. Chỉ bật mic khi bạn cần phát biểu.'}</p></div>}</div>
         {owned && <p className="password-hint">Chọn đúng cửa sổ bài giảng trong hộp thoại của trình duyệt; không chọn cửa sổ lớp học.</p>}
       </section>
