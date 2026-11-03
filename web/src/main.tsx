@@ -40,7 +40,7 @@ function App() {
     catch (error) { setMessage(error instanceof Error ? error.message : 'Không thể đăng xuất.'); }
     finally { setBusy(false); }
   }
-  return <div className="app-shell">
+  return <div className={user ? 'app-shell signed-in' : 'app-shell'}>
     <header className="topbar"><a className="brand" href="/"><span className="brand-mark">P4</span><span><strong>Classroom</strong><small>PBL4 · Đề tài 21</small></span></a><span className="topbar-status">Không gian học tập trực tuyến</span></header>
     <main>{!user ? <section className="auth-layout">
       <div className="intro-panel"><p className="eyebrow">CÙNG HỌC · CÙNG TIẾN BỘ</p><h1>Vào lớp học.<br/><em>Tập trung hơn.</em></h1><p className="intro-copy">Một không gian để giáo viên tổ chức lớp và học viên theo dõi bài giảng. Bắt đầu bằng tài khoản của bạn.</p><div className="feature-list"><div><span className="feature-icon">01</span><span><b>Tài khoản cá nhân</b><small>Họ tên rõ ràng, quyền truy cập do server kiểm soát.</small></span></div><div><span className="feature-icon">02</span><span><b>Không gian lớp học</b><small>Chỉ hiển thị lớp bạn sở hữu hoặc đã là thành viên.</small></span></div></div></div>
