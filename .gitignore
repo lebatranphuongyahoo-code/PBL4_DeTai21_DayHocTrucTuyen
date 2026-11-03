@@ -34,3 +34,10 @@ desktop.ini
 # ===== Sao luu Git local =====
 .git.broken-*/
 
+# Web rebuild dependencies, caches and generated assets
+node_modules/
+dist/
+.cache/
+*.db-wal
+*.db-shm
+
