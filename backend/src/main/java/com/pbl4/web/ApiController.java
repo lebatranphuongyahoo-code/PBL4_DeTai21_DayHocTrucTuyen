@@ -38,6 +38,8 @@ public class ApiController {
     @PostMapping("/auth/logout") public Map<String,Object> logout(@RequestHeader("Authorization") String authorization,HttpServletRequest request,HttpServletResponse response) throws SQLException {
         db.deleteSession(AuthService.tokenHash(authorization.substring(7))); restoreCookie(request,response,"",0);return Map.of("ok",true);
     }
+    public record PasswordChange(String currentPassword,String newPassword) {}
+    @PostMapping("/auth/password") public Map<String,Object> password(Authentication identity,@RequestBody PasswordChange input,HttpServletRequest request,HttpServletResponse response)throws SQLException {auth.changePassword((Database.Account)identity.getPrincipal(),input.currentPassword(),input.newPassword());restoreCookie(request,response,"",0);return Map.of("ok",true);}
     @GetMapping("/rooms") public Map<String,Object> rooms(Authentication identity) throws SQLException {
         return Map.of("ok",true,"rooms",db.listClassrooms(((Database.Account)identity.getPrincipal()).id()));
     }

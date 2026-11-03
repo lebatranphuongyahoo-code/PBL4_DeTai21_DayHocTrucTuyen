@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ClassroomMedia } from './ClassroomMedia';
 import { Icon } from './Icons';
+import { PasswordDialog } from './PasswordDialog';
 import { RoomEntryDialog } from './RoomEntryDialog';
 import { ClassManagement } from './ClassManagement';
 import { api, Detail, JoinRequest, JoinStatus, Room, User } from './api';
 
 export function Classes({ user, token, initial, onLogout, logoutBusy, logoutError }: { user: User; token: string; initial: Room[]; onLogout: () => void; logoutBusy: boolean; logoutError: string }) {
   const [rooms,setRooms]=useState(initial);
+  const [passwordOpen,setPasswordOpen]=useState(false);
   const [entryOpen,setEntryOpen]=useState(false);
   const [entryMode,setEntryMode]=useState<"create"|"join">("create");
   const mutation=useRef(false);
@@ -35,7 +37,7 @@ export function Classes({ user, token, initial, onLogout, logoutBusy, logoutErro
   return <section className={room ? "dashboard meeting-dashboard" : "dashboard"}>
     <nav className="classroom-rail" aria-label="Điều hướng">
       <div className="rail-brand" role="img" aria-label="Classroom"><svg viewBox="0 0 48 56" aria-hidden="true"><circle cx="24" cy="21" r="18"/><path d="m9 30 15-15 15 15-15 18Z"/><path d="m10 31 14 6 14-6"/></svg></div>
-      <div className="rail-links"><button className={!room ? 'active' : ''} aria-label="Danh sách lớp" onClick={()=>{setRoom(null);void action(refresh);}}><Icon name="home"/><span>Lớp học</span></button>{room&&<div className="rail-current" aria-current="page"><Icon name="screen"/><span>Phòng học</span></div>}<button onClick={()=>{if(room){setManagementOpen(true);void action(()=>open(room.id));}else{setMessage('');setEntryMode('create');setEntryOpen(true);}}}><Icon name="book"/><span>{room ? 'Quản lý lớp' : 'Tạo lớp'}</span></button>{!room&&<button onClick={()=>{setMessage('');setEntryMode('join');setEntryOpen(true);}}><Icon name="users"/><span>Tham gia</span></button>}</div>
+      <div className="rail-links"><button className={!room ? 'active' : ''} aria-label="Danh sách lớp" onClick={()=>{setRoom(null);void action(refresh);}}><Icon name="home"/><span>Lớp học</span></button>{room&&<div className="rail-current" aria-current="page"><Icon name="screen"/><span>Phòng học</span></div>}<button onClick={()=>{if(room){setManagementOpen(true);void action(()=>open(room.id));}else{setMessage('');setEntryMode('create');setEntryOpen(true);}}}><Icon name="book"/><span>{room ? 'Quản lý lớp' : 'Tạo lớp'}</span></button>{!room&&<button onClick={()=>{setMessage('');setEntryMode('join');setEntryOpen(true);}}><Icon name="users"/><span>Tham gia</span></button>}<button aria-label="Đổi mật khẩu" onClick={()=>setPasswordOpen(true)}><Icon name="settings"/><span>Tài khoản</span></button></div>
       <button className="rail-logout" aria-label="Đăng xuất" disabled={logoutBusy} onClick={onLogout}><Icon name="leave"/></button>
     </nav>
     <div className="dashboard-heading"><div><p className="eyebrow">KHÔNG GIAN CỦA BẠN</p><h1>{room?room.name:<>Xin chào,<br/><span>{user.displayName}</span></>}</h1><p>{room?'Giáo viên: '+room.owner:'Quản lý và tham gia lớp học của bạn.'}</p></div></div>
@@ -49,6 +51,7 @@ export function Classes({ user, token, initial, onLogout, logoutBusy, logoutErro
         onArchive={()=>{if(confirm("Lưu trữ lớp sẽ dừng quyền truy cập của mọi thành viên. Hiện chưa có chức năng khôi phục trên giao diện. Tiếp tục?"))void action(async()=>{await api("/rooms/"+room.id+"/archive","POST",undefined,token);setManagementOpen(false);setRoom(null);await refresh();setMessage("Đã lưu trữ lớp.");});}}
         onLeave={()=>{if(confirm("Rút khỏi danh sách lớp? Bạn sẽ cần được duyệt lại để vào lớp."))void action(async()=>{await api("/rooms/"+room.id+"/leave","POST",undefined,token);setManagementOpen(false);setRoom(null);await refresh();setMessage("Đã rút khỏi lớp.");});}} />}
     </>}
+    {passwordOpen&&<PasswordDialog token={token} onClose={()=>setPasswordOpen(false)} onChanged={()=>window.dispatchEvent(new Event('pbl4-session-expired'))}/>}
     {entryOpen&&<RoomEntryDialog teacher={entryMode==="create"} busy={busy} message={message} onClose={()=>setEntryOpen(false)} onSubmit={value=>void submitEntry(value)}/> }
   </section>;
 }
