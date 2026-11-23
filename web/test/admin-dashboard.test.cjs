@@ -31,12 +31,12 @@ test('admin dashboard loads all room states and uses admin-only archive/restore 
     const h=harness();h.effects[0]();await h.settle();
     assert.match(h.text(h.tree()),/Algebra/);
     assert.match(h.text(h.tree()),/Archived calculus/);
-    const status=h.nodes(h.tree()).find(node=>node.type==='select'&&node.props['aria-label']==='Lọc trạng thái lớp');
+    const status=h.nodes(h.tree()).find(node=>node.props.ariaLabel==='Lọc trạng thái lớp');
     assert.ok(status,'admin can filter room state');
-    status.props.onChange({target:{value:'ACTIVE'}});h.render();
+    status.props.onChange('ACTIVE');h.render();
     assert.match(h.text(h.tree()),/Algebra/);
     assert.doesNotMatch(h.text(h.tree()),/Archived calculus/);
-    status.props.onChange({target:{value:'ALL'}});h.render();
+    status.props.onChange('ALL');h.render();
     let button=h.nodes(h.tree()).find(node=>node.type==='button'&&h.text(node.props.children)==='Thành viên');
     button.props.onClick();await h.settle();
     assert.ok(h.calls.some(call=>call.url==='/admin/rooms/1'&&call.method==='GET'));
@@ -56,8 +56,8 @@ test('admin can create a class and assign an active teacher owner',async()=>{
   h.nodes(h.tree()).find(node=>node.type==='button'&&h.text(node.props.children)==='Tạo lớp').props.onClick();h.render();
   const name=h.nodes(h.tree()).find(node=>node.type==='input'&&node.props.id==='admin-room-name');
   name.props.onChange({target:{value:'Lớp vật lý'}});h.render();
-  const teacher=h.nodes(h.tree()).find(node=>node.type==='select'&&node.props.id==='admin-room-teacher');
-  teacher.props.onChange({target:{value:'teacher'}});h.render();
+  const teacher=h.nodes(h.tree()).find(node=>node.props.id==='admin-room-teacher');
+  teacher.props.onChange('teacher');h.render();
   const form=h.nodes(h.tree()).find(node=>node.type==='form'&&node.props.onSubmit?.toString().includes('preventDefault'));
   await form.props.onSubmit({preventDefault(){}});await h.settle();
   assert.ok(h.calls.some(call=>call.url==='/admin/rooms'&&call.method==='POST'&&call.body.name==='Lớp vật lý'&&call.body.teacherUsername==='teacher'));
