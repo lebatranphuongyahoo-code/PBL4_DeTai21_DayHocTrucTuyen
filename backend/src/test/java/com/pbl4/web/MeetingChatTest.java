@@ -11,7 +11,7 @@ class MeetingChatTest {
         try{
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             for(String name:java.util.List.of("owner","member","outside"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-            var owner=db.findAccount("owner");var member=db.findAccount("member");var outside=db.findAccount("outside");long id=rooms.create(owner,"Class").id();rooms.add(owner,id,"member");
+            var owner=TestAccounts.asTeacher(db,"owner");var member=db.findAccount("member");var outside=db.findAccount("outside");long id=rooms.create(owner,"Class").id();rooms.add(owner,id,"member");
             rooms.setMeeting(owner,id,true);long first=rooms.history(owner,id).get(0).id();rooms.joinHistory(member,id);
             for(int i=0;i<55;i++)rooms.postMessage(member,id,"First "+i);
             rooms.setMeeting(owner,id,false);assertEquals(50,rooms.messages(member,id,Long.MAX_VALUE).size());
@@ -33,7 +33,7 @@ class MeetingChatTest {
         String path=Path.of("target","chat-migration-"+UUID.randomUUID()+".db").toString();long id;
         var db=new Database(path);
         try{
-            var auth=new AuthService(db);var rooms=new ClassroomService(db);auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));var owner=db.findAccount("owner");id=rooms.create(owner,"Legacy").id();rooms.setMeeting(owner,id,true);rooms.setMeeting(owner,id,false);
+            var auth=new AuthService(db);var rooms=new ClassroomService(db);auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));var owner=TestAccounts.asTeacher(db,"owner");id=rooms.create(owner,"Legacy").id();rooms.setMeeting(owner,id,true);rooms.setMeeting(owner,id,false);
             db.transaction(c->{try(var s=c.createStatement()){
                 s.execute("DROP TABLE class_messages");s.execute("DELETE FROM schema_versions WHERE version=6");
                 s.execute("CREATE TABLE class_messages(id INTEGER PRIMARY KEY,classroom_id INTEGER NOT NULL REFERENCES classrooms(id),account_id INTEGER NOT NULL REFERENCES accounts(id),body TEXT NOT NULL,sent_at INTEGER NOT NULL)");

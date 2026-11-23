@@ -6,12 +6,15 @@ const Module=require('node:module');
 const ts=require('typescript');
 const React=require('react');
 
-function harness({teacher=false}={}){
-  const slots=[],effects=[],calls=[];let cursor=0,tree,nextId=1;
+function harness({teacher=false,delayLoad=false}={}){
+  const slots=[],effects=[],calls=[];let cursor=0,tree,nextId=1,releaseLoad;
   const items=[],submissions=[];
   async function api(url,method='GET',body){
     calls.push({url,method,body});
-    if(url==='/rooms/1/activities'&&method==='GET')return{activities:structuredClone(items)};
+    if(url==='/rooms/1/activities'&&method==='GET'){
+      if(delayLoad&&!releaseLoad)return new Promise(resolve=>{releaseLoad=()=>resolve({activities:structuredClone(items)});});
+      return{activities:structuredClone(items)};
+    }
     if(url==='/rooms/1/activities'&&method==='POST'){items.unshift({id:nextId++,title:body.title,prompt:body.prompt,createdAt:1,submissionCount:0,submission:null});return{ok:true};}
     const activityId=Number(url.match(/activities\/(\d+)/)?.[1]);
     if(url.endsWith('/submissions')&&method==='GET')return{submissions:structuredClone(submissions)};
@@ -32,7 +35,7 @@ function harness({teacher=false}={}){
   function nodes(node){if(Array.isArray(node))return node.flatMap(nodes);if(!node||typeof node!=='object')return[];return[node,...nodes(node.props?.children)];}
   function text(node){if(Array.isArray(node))return node.map(text).join('');if(node==null||typeof node==='boolean')return'';return typeof node==='object'?text(node.props?.children):String(node);}
   async function settle(){await new Promise(setImmediate);await new Promise(setImmediate);render();}
-  render();return{render,nodes,text,tree:()=>tree,calls,effects,settle,items};
+  render();return{render,nodes,text,tree:()=>tree,calls,effects,settle,items,releaseLoad:()=>releaseLoad?.()};
 }
 
 test('teacher can create a text activity and reload it',async()=>{
@@ -56,4 +59,17 @@ test('a student submits an answer to the activity in their class',async()=>{
   button.props.onClick();await h.settle();
   assert.ok(h.calls.some(call=>call.url==='/rooms/1/activities/7/submissions'&&call.method==='POST'&&call.body.answer==='The text argues for cooperation.'));
   assert.ok(h.calls.some(call=>call.url==='/rooms/1/activities/7/submissions'&&call.method==='POST'));
+});
+
+test('busy activities show an accessible loading indicator until the request finishes',async()=>{
+  const h=harness({delayLoad:true});
+  const pending=h.effects[0]();
+  h.render();
+  const status=h.nodes(h.tree()).find(node=>node.type==='p'&&node.props.role==='status');
+  assert.ok(status);
+  assert.match(h.text(status),/Đang tải hoặc cập nhật bài tập/);
+  assert.equal(h.tree().props['aria-busy'],true);
+  h.releaseLoad();await pending;await h.settle();
+  assert.equal(h.nodes(h.tree()).some(node=>node.type==='p'&&node.props.role==='status'),false);
+  assert.equal(h.tree().props['aria-busy'],false);
 });

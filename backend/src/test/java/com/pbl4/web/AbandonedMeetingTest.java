@@ -13,8 +13,9 @@ class AbandonedMeetingTest {
             try {
                 var auth=new AuthService(db);var rooms=new ClassroomService(db);
                 auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
-                id=rooms.create(db.findAccount("owner"),"Class").id();rooms.setMeeting(db.findAccount("owner"),id,true);
-                rooms.joinHistory(db.findAccount("owner"),id);
+                var owner=TestAccounts.asTeacher(db,"owner");
+                id=rooms.create(owner,"Class").id();rooms.setMeeting(owner,id,true);
+                rooms.joinHistory(owner,id);
             } finally {db.close();}
         }
         var reopened=new Database(path);
@@ -31,7 +32,7 @@ class AbandonedMeetingTest {
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
             auth.register(new AuthService.Registration("member","Member","Strong!23",null));
-            var owner=db.findAccount("owner");long id=rooms.create(owner,"Class").id();rooms.add(owner,id,"member");rooms.setMeeting(owner,id,true);
+            var owner=TestAccounts.asTeacher(db,"owner");long id=rooms.create(owner,"Class").id();rooms.add(owner,id,"member");rooms.setMeeting(owner,id,true);
             assertThrows(AuthService.Failure.class,()->rooms.ownerHeartbeat(db.findAccount("member"),id));
             db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE meeting_sessions SET owner_seen_at=1000000");}return null;});
             assertTrue(rooms.closeAbandonedMeetings(1_599_999).isEmpty());

@@ -9,7 +9,7 @@ class ClassroomActivityTest {
     @Test void meetingHistoryPaginatesMeetingsAndConnections() throws Exception {
         var db=new Database(Path.of("target","pages-"+UUID.randomUUID()+".db").toString());
         try{
-            var auth=new AuthService(db);var rooms=new ClassroomService(db);auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));var owner=db.findAccount("owner");long id=rooms.create(owner,"Pages").id();rooms.setMeeting(owner,id,true);long session=rooms.history(owner,id).get(0).id();
+            var auth=new AuthService(db);var rooms=new ClassroomService(db);auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));var owner=TestAccounts.asTeacher(db,"owner");long id=rooms.create(owner,"Pages").id();rooms.setMeeting(owner,id,true);long session=rooms.history(owner,id).get(0).id();
             db.transaction(c->{try(var s=c.createStatement()){
                 s.executeUpdate("UPDATE meeting_sessions SET started_at=1000,ended_at=1000000 WHERE id="+session);
                 for(int i=0;i<205;i++)s.executeUpdate("INSERT INTO meeting_connections(session_id,account_id,joined_at,left_at) VALUES("+session+","+owner.id()+","+(1000+i*2000)+","+(2000+i*2000)+")");
@@ -24,7 +24,7 @@ class ClassroomActivityTest {
         try {
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             for(String name:java.util.List.of("owner","member","outsider"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-            var owner=db.findAccount("owner");var member=db.findAccount("member");var outsider=db.findAccount("outsider");
+            var owner=TestAccounts.asTeacher(db,"owner");var member=db.findAccount("member");var outsider=db.findAccount("outsider");
             id=rooms.create(owner,"Chat class").id();rooms.add(owner,id,"member");
             assertThrows(AuthService.Failure.class,()->rooms.postMessage(member,id,"closed"));
             rooms.setMeeting(owner,id,true);
@@ -50,7 +50,7 @@ class ClassroomActivityTest {
         try {
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             for(String name:java.util.List.of("teacher","student","outside"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-            var teacher=db.findAccount("teacher");var student=db.findAccount("student");var outside=db.findAccount("outside");
+            var teacher=TestAccounts.asTeacher(db,"teacher");var student=db.findAccount("student");var outside=db.findAccount("outside");
             long id=rooms.create(teacher,"Activity class").id();rooms.add(teacher,id,"student");
             var activity=rooms.createActivity(teacher,id,"Bài đọc","Giải thích ý chính trong 500 từ.");
             assertEquals(0,rooms.activities(teacher,id).getFirst().submissionCount());

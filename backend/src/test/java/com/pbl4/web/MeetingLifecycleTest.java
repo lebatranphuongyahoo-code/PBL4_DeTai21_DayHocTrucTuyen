@@ -10,7 +10,7 @@ class MeetingLifecycleTest {
         try {
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
-            var owner=db.findAccount("owner");var room=rooms.create(owner,"Scheduled class");
+            var owner=TestAccounts.asTeacher(db,"owner");var room=rooms.create(owner,"Scheduled class");
             assertFalse(room.meetingOpen());
             assertFalse(rooms.isMeetingOpen(room.id()));
             assertTrue(rooms.history(owner,room.id()).isEmpty());
@@ -33,7 +33,7 @@ class MeetingLifecycleTest {
         try {
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
-            var owner=db.findAccount("owner");long id=rooms.create(owner,"Class").id();
+            var owner=TestAccounts.asTeacher(db,"owner");long id=rooms.create(owner,"Class").id();
             db.transaction(c->{try(var s=c.prepareStatement("DELETE FROM classroom_meetings WHERE classroom_id=?")){s.setLong(1,id);s.executeUpdate();}return null;});
             assertFalse(rooms.isMeetingOpen(id));
             assertThrows(AuthService.Failure.class,()->rooms.mediaAccess(owner,id));
@@ -47,7 +47,7 @@ class MeetingLifecycleTest {
         try {
             var auth=new AuthService(db); var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
-            var owner=db.findAccount("owner"); openId=rooms.create(owner,"Open class").id(); closedId=rooms.create(owner,"Closed class").id();
+            var owner=TestAccounts.asTeacher(db,"owner"); openId=rooms.create(owner,"Open class").id(); closedId=rooms.create(owner,"Closed class").id();
             rooms.setMeeting(owner,openId,true);
             rooms.setMeeting(owner,closedId,false);
             db.transaction(c->{try(var s=c.createStatement()){s.execute("DROP TABLE meeting_microphone_blocks");s.execute("DROP TABLE meeting_connections");s.execute("DROP TABLE meeting_sessions");s.execute("DELETE FROM schema_versions WHERE version IN (3,4,5)");}return null;});
@@ -67,7 +67,7 @@ class MeetingLifecycleTest {
         try {
             var auth=new AuthService(db);var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));auth.register(new AuthService.Registration("member","Member","Strong!23",null));
-            var owner=db.findAccount("owner");var member=db.findAccount("member");id=rooms.create(owner,"Class").id();rooms.add(owner,id,"member");rooms.setMeeting(owner,id,true);
+            var owner=TestAccounts.asTeacher(db,"owner");var member=db.findAccount("member");id=rooms.create(owner,"Class").id();rooms.add(owner,id,"member");rooms.setMeeting(owner,id,true);
             first=rooms.joinHistory(member,id);rooms.joinHistory(member,id);rooms.leaveHistory(first);
             assertTrue(rooms.history(member,id).get(0).connections().isEmpty());
             assertEquals(2,rooms.history(owner,id).get(0).connections().size());
@@ -87,7 +87,7 @@ class MeetingLifecycleTest {
         try {
             var auth=new AuthService(db); var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));
-            var owner=db.findAccount("owner"); id=rooms.create(owner,"History class").id();
+            var owner=TestAccounts.asTeacher(db,"owner"); id=rooms.create(owner,"History class").id();
             rooms.setMeeting(owner,id,true);
             rooms.setMeeting(owner,id,false); rooms.setMeeting(owner,id,false);
             rooms.setMeeting(owner,id,true); rooms.setMeeting(owner,id,true);
@@ -106,7 +106,7 @@ class MeetingLifecycleTest {
         String path=Path.of("target","meeting-"+UUID.randomUUID(),"db.sqlite").toString();long id;
         var db=new Database(path);try{var auth=new AuthService(db);var rooms=new ClassroomService(db);
             auth.register(new AuthService.Registration("owner","Owner","Strong!23",null));auth.register(new AuthService.Registration("member","Member","Strong!23",null));
-            var owner=db.findAccount("owner");var member=db.findAccount("member");var room=rooms.create(owner,"Online class");id=room.id();rooms.add(owner,id,"member");
+            var owner=TestAccounts.asTeacher(db,"owner");var member=db.findAccount("member");var room=rooms.create(owner,"Online class");id=room.id();rooms.add(owner,id,"member");
             assertThrows(AuthService.Failure.class,()->rooms.setMeeting(member,room.id(),false));
             rooms.setMeeting(owner,id,true);rooms.setMeeting(owner,id,false);assertFalse(rooms.detail(member,id).meetingOpen());assertEquals(2,rooms.detail(member,id).members().size());
             assertThrows(AuthService.Failure.class,()->rooms.mediaAccess(member,room.id()));assertEquals(1,db.listClassrooms(member.id()).size());

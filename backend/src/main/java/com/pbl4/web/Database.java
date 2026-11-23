@@ -15,6 +15,7 @@ import jakarta.annotation.PreDestroy;
 public class Database {
     public record Account(long id, String username, String displayName, String passwordHash, String role) {}
     public record Classroom(long id, String name, int members, boolean owned) {}
+    public record AdminUser(long id, String username, String displayName, String role, long createdAt) {}
     public record AdminClassroom(long id, String name, long ownerId, String ownerUsername, String ownerDisplayName,
                                  int members, String status, long createdAt) {}
     private final Connection connection;
@@ -125,6 +126,12 @@ public class Database {
             return s.executeUpdate() == 1;
         }
     }
+    public synchronized boolean promoteStudentToTeacher(long accountId) throws SQLException {
+        try (PreparedStatement s = connection.prepareStatement("UPDATE accounts SET role='TEACHER' WHERE id=? AND role='STUDENT' AND status='ACTIVE'")) {
+            s.setLong(1, accountId);
+            return s.executeUpdate() == 1;
+        }
+    }
     private Account account(ResultSet rs) throws SQLException {
         return new Account(rs.getLong("id"), rs.getString("username"), rs.getString("display_name"), rs.getString("password_hash"), rs.getString("role"));
     }
@@ -167,6 +174,14 @@ public class Database {
             var result = new ArrayList<AdminClassroom>();
             while (rs.next()) result.add(new AdminClassroom(rs.getLong(1), rs.getString(2), rs.getLong(3),
                 rs.getString(4), rs.getString(5), rs.getInt(6), rs.getString(7), rs.getLong(8)));
+            return result;
+        }
+    }
+    public synchronized List<AdminUser> listAdminUsers() throws SQLException {
+        String sql = "SELECT id,username,display_name,role,created_at FROM accounts WHERE status='ACTIVE' ORDER BY username COLLATE NOCASE";
+        try (PreparedStatement s = connection.prepareStatement(sql); ResultSet rs = s.executeQuery()) {
+            var result = new ArrayList<AdminUser>();
+            while (rs.next()) result.add(new AdminUser(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getLong(5)));
             return result;
         }
     }

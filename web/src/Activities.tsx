@@ -52,7 +52,8 @@ export function Activities({ roomId, token, teacher }: { roomId: number; token: 
     catch (e) { setError(e instanceof Error ? e.message : 'Không lưu được phản hồi.'); }
     finally { setBusy(false); }
   }
-  return <section className="activities-panel" aria-label="Bài tập tương tác"><div className="section-heading"><h2>Bài tập tương tác</h2><button className="ghost-button" disabled={busy} onClick={() => void load()}>Làm mới</button></div>
+  return <section className="activities-panel" aria-label="Bài tập tương tác" aria-busy={busy}><div className="section-heading"><h2>Bài tập tương tác</h2><button className="ghost-button" disabled={busy} onClick={() => void load()}>Làm mới</button></div>
+    {busy && <p className="activity-muted" role="status" aria-live="polite">Đang tải hoặc cập nhật bài tập…</p>}
     {error && <p className="form-message" role="alert">{error}</p>}
     {teacher && <form className="activity-create" onSubmit={create}><label>Tiêu đề<input required minLength={2} maxLength={120} value={title} onChange={event => setTitle(event.target.value)} /></label><label>Nội dung bài tập<textarea required maxLength={2000} value={prompt} onChange={event => setPrompt(event.target.value)} /></label><button className="primary-button" type="submit" disabled={busy}>Đăng bài tập</button></form>}
     {!busy && !items.length && <p className="activity-muted">Chưa có bài tập nào.</p>}

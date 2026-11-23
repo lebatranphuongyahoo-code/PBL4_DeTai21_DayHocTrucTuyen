@@ -56,7 +56,7 @@ class MediaRelayTest {
 
     @Test void quickTunnelOriginCanOpenMediaSocket() throws Exception {
         auth.register(new AuthService.Registration("tunnelowner","Tunnel owner","Strong!23",null));
-        var owner=db.findAccount("tunnelowner");
+        var owner=TestAccounts.asTeacher(db,"tunnelowner");
         var room=rooms.create(owner,"Tunnel class");
         rooms.setMeeting(owner,room.id(),true);
         var session=auth.login(new AuthService.Login("tunnelowner","Strong!23"));
@@ -70,7 +70,7 @@ class MediaRelayTest {
 
     @Test void meetingChatDoesNotLeakIntoNewSessionAndHistoryIsMemberReadable() throws Exception {
         for(String name:List.of("sessionowner","sessionmember"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        var owner=db.findAccount("sessionowner");var member=db.findAccount("sessionmember");long id=rooms.create(owner,"Session chat").id();rooms.add(owner,id,"sessionmember");rooms.setMeeting(owner,id,true);
+        var owner=TestAccounts.asTeacher(db,"sessionowner");var member=db.findAccount("sessionmember");long id=rooms.create(owner,"Session chat").id();rooms.add(owner,id,"sessionmember");rooms.setMeeting(owner,id,true);
         long first=rooms.detail(owner,id).meetingId();var token=auth.login(new AuthService.Login("sessionmember","Strong!23")).token();String join="{\"type\":\"join\",\"roomId\":"+id+"}";
         try(var client=HttpClient.newHttpClient()){
             Listener a=new Listener();var one=connect(client,token,a);
@@ -89,7 +89,7 @@ class MediaRelayTest {
 
     @Test void microphoneBlockAppliesToOtherTabsAndReconnectsUntilMeetingEnds() throws Exception {
         for(String name:List.of("blockowner","blockmember"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        var owner=db.findAccount("blockowner");long id=rooms.create(owner,"Block class").id();
+        var owner=TestAccounts.asTeacher(db,"blockowner");long id=rooms.create(owner,"Block class").id();
         rooms.add(owner,id,"blockmember");rooms.setMeeting(owner,id,true);
         var ot=auth.login(new AuthService.Login("blockowner","Strong!23")).token();
         var mt=auth.login(new AuthService.Login("blockmember","Strong!23")).token();
@@ -121,7 +121,7 @@ class MediaRelayTest {
 
     @Test void emptyRoomKeepsMicPolicyAndNewMeetingResetsIt() throws Exception {
         for(String name:List.of("emptyowner","emptymember"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        var owner=db.findAccount("emptyowner");long id=rooms.create(owner,"Empty room").id();rooms.add(owner,id,"emptymember");rooms.setMeeting(owner,id,true);
+        var owner=TestAccounts.asTeacher(db,"emptyowner");long id=rooms.create(owner,"Empty room").id();rooms.add(owner,id,"emptymember");rooms.setMeeting(owner,id,true);
         var ot=auth.login(new AuthService.Login("emptyowner","Strong!23")).token();var mt=auth.login(new AuthService.Login("emptymember","Strong!23")).token();
         String join="{\"type\":\"join\",\"roomId\":"+id+"}";
         try(var client=HttpClient.newHttpClient()) {
@@ -140,7 +140,7 @@ class MediaRelayTest {
 
     @Test void savedChatReplaysOnReconnectAndOwnerTimeoutClosesConnectedPeers() throws Exception {
         for(String name:List.of("chatowner","chatmember"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        var owner=db.findAccount("chatowner");long id=rooms.create(owner,"Replay room").id();rooms.add(owner,id,"chatmember");rooms.setMeeting(owner,id,true);
+        var owner=TestAccounts.asTeacher(db,"chatowner");long id=rooms.create(owner,"Replay room").id();rooms.add(owner,id,"chatmember");rooms.setMeeting(owner,id,true);
         var token=auth.login(new AuthService.Login("chatmember","Strong!23")).token();String join="{\"type\":\"join\",\"roomId\":"+id+"}";
         try(var client=HttpClient.newHttpClient()) {
             Listener first=new Listener();var socket=connect(client,token,first);long messageId;
@@ -159,7 +159,7 @@ class MediaRelayTest {
 
     @Test void endingMeetingClosesEveryoneAndBlocksReentryUntilOwnerRestarts() throws Exception {
         for(String name:List.of("lifeowner","lifemember"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        var owner=db.findAccount("lifeowner");long id=rooms.create(owner,"Lifecycle class").id();
+        var owner=TestAccounts.asTeacher(db,"lifeowner");long id=rooms.create(owner,"Lifecycle class").id();
         rooms.add(owner,id,"lifemember");
         var ownerSession=auth.login(new AuthService.Login("lifeowner","Strong!23"));
         var memberSession=auth.login(new AuthService.Login("lifemember","Strong!23"));
@@ -191,8 +191,7 @@ class MediaRelayTest {
 
     @Test void realSocketsEnforceRoomIsolationPacketsAndRevocation() throws Exception {
         for(String name:List.of("teacher","learner","outsider"))auth.register(new AuthService.Registration(name,name,"Strong!23",null));
-        db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE accounts SET role='TEACHER' WHERE username='learner'");}return null;});
-        var teacher=db.findAccount("teacher");var student=db.findAccount("learner");
+        var teacher=TestAccounts.asTeacher(db,"teacher");var student=TestAccounts.asTeacher(db,"learner");
         var first=rooms.create(teacher,"First class");var second=rooms.create(student,"Other class");
         rooms.setMeeting(teacher,first.id(),true);rooms.setMeeting(student,second.id(),true);
         rooms.add(teacher,first.id(),"learner");rooms.add(student,second.id(),"outsider");

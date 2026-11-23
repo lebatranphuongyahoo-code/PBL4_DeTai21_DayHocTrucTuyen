@@ -51,6 +51,7 @@ Khi cập nhật bản đang chạy, giữ nguyên `PORT`, `BIND_ADDRESS`, `PBL4
 - [Chạy web và tạo link Cloudflare](docs/HUONG_DAN_CHAY_VA_GUI_LINK_CLOUDFLARE.md).
 - [Học kiến trúc và kiểm thử web](docs/HUONG_DAN_HOC_VA_KIEM_THU_WEB.md).
 - [Kịch bản kiểm thử nhóm trên hai mạng](docs/TEST_HAI_MANG.md).
+- [Hướng dẫn test PBL4 từ A đến Z](docs/HUONG_DAN_TEST_A_DEN_Z.md).
 - [Bản đồ học dự án web](docs/BAN_DO_HOC_WEB.md).
 
 Tài liệu cũ về Swing, cổng TCP 9000/UDP 9001 và `com.pbl4.Launcher` trong `docs/` được giữ làm lịch sử; không dùng để chạy hoặc mô tả kiến trúc web hiện tại.

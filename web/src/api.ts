@@ -10,8 +10,9 @@ export type ActivitySubmission = { accountId: number; username: string; displayN
 export type Activity = { id: number; title: string; prompt: string; createdAt: number; submissionCount: number; submission: ActivitySubmission | null };
 export type Reply = { ok: boolean; message?: string; errors?: Record<string,string>; user?: User; token?: string; rooms?: Room[]; room?: Detail; requests?: JoinRequest[]; joinStatuses?: JoinStatus[]; meetings?: MeetingHistory[]; messages?: ChatMessage[]; activities?: Activity[]; activity?: Activity; submissions?: ActivitySubmission[]; submission?: ActivitySubmission; ticket?: string };
 export type AdminRoom = { id: number; name: string; members: number; ownerId: number; ownerUsername: string; ownerDisplayName: string; status: 'ACTIVE' | 'ARCHIVED' };
+export type AdminUser = { id: number; username: string; displayName: string; role: 'STUDENT' | 'TEACHER' | 'ADMIN'; createdAt: number };
 export type AdminRoomDetail = Omit<AdminRoom, 'members'> & { meetingOpen: boolean; members: Member[] };
-export type AdminReply = { ok: boolean; message?: string; errors?: Record<string,string>; rooms?: AdminRoom[]; room?: AdminRoomDetail };
+export type AdminReply = { ok: boolean; message?: string; errors?: Record<string,string>; rooms?: AdminRoom[]; room?: AdminRoomDetail; users?: AdminUser[]; roomId?: number };
 export async function api<T = Reply>(path: string, method = 'GET', body?: unknown, token?: string): Promise<T> {
   const response = await fetch('/api'+path, { method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer '+token } : {}) }, body: body ? JSON.stringify(body) : undefined });
   const data: Reply = await response.json();

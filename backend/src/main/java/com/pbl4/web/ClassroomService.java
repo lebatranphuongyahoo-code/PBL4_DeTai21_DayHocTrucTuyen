@@ -52,6 +52,13 @@ public class ClassroomService {
     public List<Database.AdminClassroom> adminClassrooms(Database.Account user) throws SQLException {
         admin(user); return db.listAdminClassrooms();
     }
+    public List<Database.AdminUser> adminUsers(Database.Account user) throws SQLException {
+        admin(user); return db.listAdminUsers();
+    }
+    public void promoteStudentToTeacher(Database.Account user,long accountId) throws SQLException {
+        admin(user);
+        if(!db.promoteStudentToTeacher(accountId))throw new AuthService.Failure(409,"Chỉ tài khoản học viên đang hoạt động mới được cấp quyền giảng viên.",Map.of());
+    }
     public AdminDetail adminDetail(Database.Account user,long id) throws SQLException {
         return db.transaction(c->{
             admin(user); Stored room=room(c,id);
@@ -82,22 +89,45 @@ public class ClassroomService {
         return new Detail(room.id(),room.name(),room.owner(),room.ownerId()==user.id(),room.ownerId()==user.id()?room.invite():null,members,meetingOpen(c,room.id()),latestMeeting(c,room.id()));
     }
     public Detail create(Database.Account user,String name) throws SQLException {
+        if(!"TEACHER".equals(user.role()))throw denied();
+        String clean=className(name);
+        return db.transaction(c->{
+            long id=create(c,user.id(),clean);
+            return detail(c,user,room(c,id));
+        });
+    }
+    public long createForTeacher(Database.Account user,String name,String teacherUsername) throws SQLException {
+        admin(user);
+        String clean=className(name),username=teacherUsername==null?"":teacherUsername.strip();
+        return db.transaction(c->{
+            long ownerId;
+            try(var s=c.prepareStatement("SELECT id FROM accounts WHERE username=? AND role='TEACHER' AND status='ACTIVE'")){
+                s.setString(1,username);try(var r=s.executeQuery()){
+                    if(!r.next())throw new AuthService.Failure(400,"Hãy chọn một tài khoản giảng viên đang hoạt động.",Map.of("teacherUsername","Tài khoản phải có quyền giảng viên."));
+                    ownerId=r.getLong(1);
+                }
+            }
+            return create(c,ownerId,clean);
+        });
+    }
+    private String className(String name) {
         String clean=name==null?"":name.strip();
         if(clean.length()<2||clean.length()>100||clean.codePoints().anyMatch(Character::isISOControl))throw invalid("Tên lớp cần 2–100 ký tự.");
-        return db.transaction(c->{
-            for(int attempt=0;attempt<10;attempt++){
-                byte[] bytes=new byte[6];random.nextBytes(bytes);String invite=HexFormat.of().formatHex(bytes).toUpperCase(Locale.ROOT);
-                try(var s=c.prepareStatement("INSERT INTO classrooms(name,owner_id,invite_code,created_at) VALUES(?,?,?,?) ON CONFLICT(invite_code) DO NOTHING")){
-                    s.setString(1,clean);s.setLong(2,user.id());s.setString(3,invite);s.setLong(4,System.currentTimeMillis());
-                    if(s.executeUpdate()==0)continue;
-                }
-                long id;
-                try(var s=c.createStatement();var r=s.executeQuery("SELECT last_insert_rowid()")){r.next();id=r.getLong(1);}
-                try(var meeting=c.prepareStatement("INSERT INTO classroom_meetings(classroom_id,is_open) VALUES(?,0)")){meeting.setLong(1,id);meeting.executeUpdate();}
-                return detail(c,user,room(c,id));
+        return clean;
+    }
+    private long create(Connection c,long ownerId,String name) throws SQLException {
+        for(int attempt=0;attempt<10;attempt++){
+            byte[] bytes=new byte[6];random.nextBytes(bytes);String invite=HexFormat.of().formatHex(bytes).toUpperCase(Locale.ROOT);
+            try(var s=c.prepareStatement("INSERT INTO classrooms(name,owner_id,invite_code,created_at) VALUES(?,?,?,?) ON CONFLICT(invite_code) DO NOTHING")){
+                s.setString(1,name);s.setLong(2,ownerId);s.setString(3,invite);s.setLong(4,System.currentTimeMillis());
+                if(s.executeUpdate()==0)continue;
             }
-            throw new SQLException("Invite allocation failed");
-        });
+            long id;
+            try(var s=c.createStatement();var r=s.executeQuery("SELECT last_insert_rowid()")){r.next();id=r.getLong(1);}
+            try(var meeting=c.prepareStatement("INSERT INTO classroom_meetings(classroom_id,is_open) VALUES(?,0)")){meeting.setLong(1,id);meeting.executeUpdate();}
+            return id;
+        }
+        throw new SQLException("Invite allocation failed");
     }
     private boolean meetingOpen(Connection c,long id)throws SQLException {try(var s=c.prepareStatement("SELECT is_open FROM classroom_meetings WHERE classroom_id=?")){s.setLong(1,id);try(var r=s.executeQuery()){return r.next()&&r.getInt(1)==1;}}}
     private Long latestMeeting(Connection c,long id)throws SQLException {
@@ -279,6 +309,13 @@ public class ClassroomService {
         db.transaction(c->{Stored room=room(c,id);ownerOrAdmin(user,room);
             setMeeting(c,id,false);
             try(var s=c.prepareStatement("UPDATE classrooms SET status='ARCHIVED' WHERE id=?")){s.setLong(1,id);s.executeUpdate();}return null;
+        });
+    }
+    public void archiveAsAdmin(Database.Account user,long id) throws SQLException {
+        db.transaction(c->{
+            admin(user); Stored room=room(c,id); active(room);
+            try(var s=c.prepareStatement("UPDATE classrooms SET status='ARCHIVED' WHERE id=?")){s.setLong(1,id);s.executeUpdate();}
+            return null;
         });
     }
     public void restore(Database.Account user,long id) throws SQLException {

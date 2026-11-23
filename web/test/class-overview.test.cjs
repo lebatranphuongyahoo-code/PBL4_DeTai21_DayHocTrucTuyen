@@ -6,7 +6,7 @@ const Module=require('node:module');
 const ts=require('typescript');
 const React=require('react');
 
-function harness({owned=true,open=true}={}){
+function harness({owned=true,open=true,role='STUDENT'}={}){
   const slots=[],effects=[];let cursor=0,tree,delayedDetail;
   const detail={id:1,name:'QA class',owner:'Owner',owned,members:[],meetingOpen:open,meetingId:open?10:null};
   const initial=[{id:1,name:'QA class',owned,members:1},{id:2,name:'Other class',owned,members:1}];
@@ -24,7 +24,7 @@ function harness({owned=true,open=true}={}){
     return{room:structuredClone(id===2?{...detail,id:2,name:'Other class'}:detail),rooms:initial,requests:[],joinStatuses:[]};
   }}:name.startsWith('./')?new Proxy({},{get:()=>()=>null}):require(name);
   compiled._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,filename);
-  function render(){cursor=0;tree=compiled.exports.Classes({user:{username:'qa',displayName:'QA',role:'STUDENT'},token:'qa',initial,onLogout(){},logoutBusy:false,logoutError:''});return tree;}
+  function render(){cursor=0;tree=compiled.exports.Classes({user:{username:'qa',displayName:'QA',role},token:'qa',initial,onLogout(){},logoutBusy:false,logoutError:''});return tree;}
   function nodes(node,parents=[]){if(Array.isArray(node))return node.flatMap(x=>nodes(x,parents));if(!node||typeof node!=='object')return[];return[{node,parents},...nodes(node.props?.children,[...parents,node])];}
   function text(node){if(Array.isArray(node))return node.map(text).join('');if(node==null||typeof node==='boolean')return'';return typeof node==='object'?text(node.props?.children):String(node);}
   const component=type=>nodes(tree).find(x=>x.node.type===type);
@@ -55,9 +55,16 @@ test('browsing another class is allowed before joining, and blocked while connec
   const h=harness();await h.click('Mở lớp');await h.click('Danh sách lớp');await h.click('Mở lớp',1);assert.equal(h.history().node.props.roomId,2);
   await h.join();await h.click('Danh sách lớp');await h.click('Mở lớp',0);assert.equal(h.media().node.props.roomId,2);assert.match(h.text(),/Rời buổi học hiện tại/);
 });
-test('after leaving a meeting, the class list still offers creating and joining other classes',async()=>{
-  const h=harness();await h.click('Mở lớp');await h.join();h.media().node.props.onExit();await h.settle();await h.click('Danh sách lớp');
+test('after leaving a meeting, a teacher can still create and join other classes',async()=>{
+  const h=harness({role:'TEACHER'});await h.click('Mở lớp');await h.join();h.media().node.props.onExit();await h.settle();await h.click('Danh sách lớp');
   assert.match(h.text(),/Tạo lớp mới/);assert.match(h.text(),/Nhập mã lớp/);assert.match(h.text(),/Yêu cầu của bạn/);
+});
+test('a student can join classes but sees no class-creation controls',async()=>{
+  const h=harness({role:'STUDENT'});
+  assert.doesNotMatch(h.text(),/Tạo lớp/);
+  assert.match(h.text(),/Nhập mã lớp/);
+  await h.click('Mở lớp');
+  assert.doesNotMatch(h.text(),/Tạo lớp/);
 });
 test('a closed-room poll delayed across Start cannot replace the newly joined meeting',async()=>{
   const previous={document:global.document,window:global.window};global.document={hidden:false};global.window={setInterval(){return 1;},clearInterval(){}};

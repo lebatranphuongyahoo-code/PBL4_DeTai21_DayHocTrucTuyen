@@ -25,14 +25,24 @@ class AdminApiTest {
     @Autowired ClassroomService rooms;
 
     @Test void onlyAdminCanUseAdminRoutesAndAdminStillNeedsMembershipForMedia() throws Exception {
-        for(String name:new String[]{"adminapi","teachapi","studentapi"})auth.register(new AuthService.Registration(name,name,"Strong!23",null));
+        for(String name:new String[]{"adminapi","teachapi","studentapi","promoteapi"})auth.register(new AuthService.Registration(name,name,"Strong!23",null));
         db.setRole("adminapi","ADMIN");
-        var teacher=db.findAccount("teachapi");long id=rooms.create(teacher,"Admin API class").id();
+        var teacher=TestAccounts.asTeacher(db,"teachapi");long id=rooms.create(teacher,"Admin API class").id();
         String admin=auth.login(new AuthService.Login("adminapi","Strong!23")).token();
+        String teacherToken=auth.login(new AuthService.Login("teachapi","Strong!23")).token();
         String student=auth.login(new AuthService.Login("studentapi","Strong!23")).token();
+        String teacherHeader="Bearer "+teacherToken,adminHeader="Bearer "+admin,studentHeader="Bearer "+student;
+
+        mvc.perform(post("/api/rooms").header("Authorization",studentHeader).contentType("application/json").content("{\"name\":\"Student room\"}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(post("/api/rooms").header("Authorization",adminHeader).contentType("application/json").content("{\"name\":\"Unassigned admin room\"}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(post("/api/rooms").header("Authorization",teacherHeader).contentType("application/json").content("{\"name\":\"Teacher room\"}"))
+            .andExpect(status().isOk());
+
         mvc.perform(get("/api/admin/rooms").header("Authorization","Bearer "+admin))
             .andExpect(status().isOk()).andExpect(jsonPath("$.rooms[0].ownerUsername").value("teachapi"));
-        mvc.perform(get("/api/admin/rooms").header("Authorization","Bearer "+student)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/rooms").header("Authorization",studentHeader)).andExpect(status().isForbidden());
         mvc.perform(get("/api/admin/rooms/"+id).header("Authorization","Bearer "+admin))
             .andExpect(status().isOk()).andExpect(jsonPath("$.room.members[0].id").exists());
         mvc.perform(post("/api/admin/rooms/"+id+"/archive").header("Authorization","Bearer "+admin))
@@ -41,10 +51,40 @@ class AdminApiTest {
             .andExpect(status().isOk()).andExpect(jsonPath("$.rooms[0].status").value("ARCHIVED"));
         mvc.perform(get("/api/admin/rooms/"+id).header("Authorization","Bearer "+admin))
             .andExpect(status().isOk()).andExpect(jsonPath("$.room.status").value("ARCHIVED"));
-        mvc.perform(post("/api/admin/rooms/"+id+"/restore").header("Authorization","Bearer "+student))
+        mvc.perform(post("/api/admin/rooms/"+id+"/restore").header("Authorization",studentHeader))
             .andExpect(status().isForbidden());
         mvc.perform(post("/api/admin/rooms/"+id+"/restore").header("Authorization","Bearer "+admin))
             .andExpect(status().isOk());
         org.junit.jupiter.api.Assertions.assertThrows(AuthService.Failure.class,()->rooms.mediaAccess(db.findAccount("adminapi"),id));
+
+        mvc.perform(get("/api/admin/rooms").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/rooms/"+id).header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/admin/rooms/"+id+"/archive").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/admin/rooms/"+id+"/restore").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/admin/rooms/"+id+"/owner").header("Authorization",teacherHeader).contentType("application/json").content("{\"username\":\"teachapi\"}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(post("/api/admin/rooms/"+id+"/members/999/transfer").header("Authorization",teacherHeader).contentType("application/json").content("{\"targetRoomId\":999}"))
+            .andExpect(status().isForbidden());
+        mvc.perform(get("/api/admin/users").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/admin/rooms").header("Authorization",teacherHeader).contentType("application/json")
+                .content("{\"name\":\"Teacher cannot create as admin\",\"teacherUsername\":\"teachapi\"}"))
+            .andExpect(status().isForbidden());
+
+        mvc.perform(get("/api/admin/users").header("Authorization",adminHeader))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.users[?(@.username=='studentapi')].role").value("STUDENT"));
+        long promoteId=db.findAccount("promoteapi").id();
+        mvc.perform(post("/api/admin/users/"+promoteId+"/teacher").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/admin/users/"+promoteId+"/teacher").header("Authorization",adminHeader)).andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals("TEACHER",db.findAccount("promoteapi").role());
+
+        var adminCreated=mvc.perform(post("/api/admin/rooms").header("Authorization",adminHeader).contentType("application/json")
+                .content("{\"name\":\"Admin assigned room\",\"teacherUsername\":\"teachapi\"}"))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.roomId").isNumber()).andReturn();
+        long assignedRoomId=new com.fasterxml.jackson.databind.ObjectMapper().readTree(adminCreated.getResponse().getContentAsString()).get("roomId").asLong();
+        mvc.perform(get("/api/admin/rooms/"+assignedRoomId).header("Authorization",adminHeader))
+            .andExpect(status().isOk()).andExpect(jsonPath("$.room.ownerUsername").value("teachapi"));
+        mvc.perform(post("/api/admin/rooms").header("Authorization",adminHeader).contentType("application/json")
+                .content("{\"name\":\"Bad owner room\",\"teacherUsername\":\"studentapi\"}"))
+            .andExpect(status().isBadRequest());
     }
 }

@@ -6,16 +6,17 @@ const Module=require('node:module');
 const ts=require('typescript');
 const React=require('react');
 
-function harness(){
+function harness(options={}){
   const slots=[],effects=[],calls=[];let cursor=0,tree;
-  const rooms=[{id:1,name:'Algebra',members:2,ownerId:10,ownerUsername:'teacher',ownerDisplayName:'Teacher',status:'ACTIVE'},{id:2,name:'Archived calculus',members:3,ownerId:12,ownerUsername:'oldteacher',ownerDisplayName:'Old Teacher',status:'ARCHIVED'}];
+  const rooms=options.rooms??[{id:1,name:'Algebra',members:2,ownerId:10,ownerUsername:'teacher',ownerDisplayName:'Teacher',status:'ACTIVE'},{id:2,name:'Archived calculus',members:3,ownerId:12,ownerUsername:'oldteacher',ownerDisplayName:'Old Teacher',status:'ARCHIVED'}];
+  const users=options.users??[{id:10,username:'teacher',displayName:'Teacher',role:'TEACHER'},{id:11,username:'student',displayName:'Student',role:'STUDENT'},{id:12,username:'admin',displayName:'Admin',role:'ADMIN'}];
   const detail={...rooms[0],meetingOpen:false,members:[{id:10,username:'teacher',displayName:'Teacher',role:'OWNER'},{id:11,username:'student',displayName:'Student',role:'MEMBER'}]};
   const hooks={...React,
     useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;}];},
     useEffect(effect){effects.push(effect);},
   };
   const filename=path.join(__dirname,'../src/AdminDashboard.tsx'),compiled=new Module(filename,module);compiled.paths=module.paths;
-  compiled.require=name=>name==='react'?hooks:name==='./api'?{api:async(url,method='GET',body)=>{calls.push({url,method,body});return url==='/admin/rooms'?{rooms}:url==='/admin/rooms/1'?{room:structuredClone(detail)}:{ok:true};}}:name.startsWith('./')?new Proxy({},{get:()=>()=>null}):require(name);
+  compiled.require=name=>name==='react'?hooks:name==='./api'?{api:async(url,method='GET',body)=>{calls.push({url,method,body});if(url==='/admin/rooms'&&method==='GET'){if(options.roomsError)throw new Error('Không kết nối được.');return{rooms};}if(url==='/admin/users'&&method==='GET'){if(options.usersError)throw new Error('Không tải được người dùng.');return{users};}if(url==='/admin/users/11/teacher'&&method==='POST'){users.find(account=>account.id===11).role='TEACHER';return{ok:true};}return url==='/admin/rooms/1'?{room:structuredClone(detail)}:{ok:true};}}:name.startsWith('./')?new Proxy({},{get:()=>()=>null}):require(name);
   compiled._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,filename);
   function render(){cursor=0;tree=compiled.exports.AdminDashboard({user:{username:'admin',displayName:'Admin',role:'ADMIN'},token:'admin-token',onLogout(){},logoutBusy:false,logoutError:''});return tree;}
   function nodes(node){if(Array.isArray(node))return node.flatMap(nodes);if(!node||typeof node!=='object')return[];return[node,...nodes(node.props?.children)];}
@@ -48,4 +49,36 @@ test('admin dashboard loads all room states and uses admin-only archive/restore 
     assert.ok(h.calls.some(call=>call.url==='/admin/rooms/2/restore'&&call.method==='POST'));
     assert.ok(h.calls.every(call=>!call.url.startsWith('/rooms/')),'admin operations must not use teacher/member room APIs');
   }finally{global.confirm=previous;}
+});
+
+test('admin can create a class and assign an active teacher owner',async()=>{
+  const h=harness();h.effects[0]();await h.settle();
+  h.nodes(h.tree()).find(node=>node.type==='button'&&h.text(node.props.children)==='Tạo lớp').props.onClick();h.render();
+  const name=h.nodes(h.tree()).find(node=>node.type==='input'&&node.props.id==='admin-room-name');
+  name.props.onChange({target:{value:'Lớp vật lý'}});h.render();
+  const teacher=h.nodes(h.tree()).find(node=>node.type==='select'&&node.props.id==='admin-room-teacher');
+  teacher.props.onChange({target:{value:'teacher'}});h.render();
+  const form=h.nodes(h.tree()).find(node=>node.type==='form'&&node.props.onSubmit?.toString().includes('preventDefault'));
+  await form.props.onSubmit({preventDefault(){}});await h.settle();
+  assert.ok(h.calls.some(call=>call.url==='/admin/rooms'&&call.method==='POST'&&call.body.name==='Lớp vật lý'&&call.body.teacherUsername==='teacher'));
+});
+
+test('admin can list accounts and promote a student to teacher',async()=>{
+  const h=harness();h.effects[0]();await h.settle();
+  assert.match(h.text(h.tree()),/Student/);
+  const promote=h.nodes(h.tree()).find(node=>node.type==='button'&&h.text(node.props.children)==='Cấp quyền giảng viên');
+  assert.ok(promote);promote.props.onClick();await h.settle();
+  assert.ok(h.calls.some(call=>call.url==='/admin/users/11/teacher'&&call.method==='POST'));
+  assert.match(h.text(h.tree()),/Giảng viên/);
+});
+
+test('room loading and network errors do not render a false zero-room empty state',async()=>{
+  const loading=harness({rooms:[]});loading.effects[0]();
+  assert.match(loading.text(loading.render()),/Đang tải danh sách lớp/);
+  assert.doesNotMatch(loading.text(loading.tree()),/0 lớp|Chưa có lớp nào/);
+  await loading.settle();
+  assert.match(loading.text(loading.tree()),/Chưa có lớp nào/);
+  const failed=harness({roomsError:true});failed.effects[0]();await failed.settle();
+  assert.match(failed.text(failed.tree()),/Không kết nối được/);
+  assert.doesNotMatch(failed.text(failed.tree()),/0 lớp|Chưa có lớp nào/);
 });

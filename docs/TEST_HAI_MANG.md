@@ -1,10 +1,10 @@
 # Test cả nhóm ở các mạng khác nhau
 
-Máy A chạy một Java server và một tunnel. B/C chỉ cần Chrome/Edge, tai nghe và URL HTTPS của A; không chạy server riêng. Public registration không chọn role. Người vận hành cấp một tài khoản ADMIN và một tài khoản TEACHER bằng CLI; Admin quản lý lớp, Teacher điều hành buổi học. Người được thêm/duyệt là thành viên và có thể xin quyền trình bày.
+Máy A chạy một Java server và một tunnel. B/C chỉ cần Chrome/Edge, tai nghe và URL HTTPS của A; không chạy server riêng. Public registration luôn tạo Student. Người vận hành bootstrap một Admin thử nghiệm bằng CLI; sau đó Admin cấp quyền Teacher trong dashboard, tạo lớp và gán Teacher làm chủ lớp. Teacher điều hành buổi học; thành viên có thể xin quyền trình bày.
 
 ## 1. Chuẩn bị trên máy A
 
-Trong VS Code, mở thư mục E:/PBL4_DeTai21. Nếu cần cập nhật/build, dừng JAR cũ bằng Ctrl+C trước. Kiểm tra git status --short và git branch --show-current. Nhánh dùng là web-rebuild. Nếu có thay đổi chưa lưu, không reset hoặc checkout ép; giữ thay đổi và xử lý trước khi pull. Checkout sạch có thể chạy git pull --ff-only origin web-rebuild.
+Trong VS Code, mở thư mục repository. Nếu cần cập nhật/build, dừng JAR cũ bằng Ctrl+C trước. Kiểm tra git status --short và git branch --show-current. Dùng nhánh `codex/trung-tuong-2026-11-22` và pull fast-forward từ đúng nhánh này. Nếu có thay đổi chưa lưu, không reset hoặc checkout ép; giữ thay đổi và xử lý trước khi pull.
 
 Build: npm --prefix web ci, sau đó ./scripts/build-web.ps1 tại gốc repo. Cần JDK21, Maven3.9+, Node tương thích Vite7 (ví dụ 22.12+). Nếu policy chặn script, chạy npm --prefix web run build rồi mvn -f backend/pom.xml verify. Bản đã build đúng phiên bản có thể bỏ qua.
 
@@ -30,51 +30,51 @@ Copy URL https://...trycloudflare.com thật được in ra. Giữ terminal 2 ch
 Ctrl+C dừng Java, giữ tunnel. Điền URL thật, không có dấu / cuối:
 
     $publicUrl = 'https://DIEN-URL-THAT.trycloudflare.com'
-    java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db "--app.allowed-origins=$publicUrl"
+    java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db "--app.allowed-origins=$publicUrl" --grant-admin=qaadmin
 
 Không đặt origin là *. Không cần profile LAN hoặc mở port router cho luồng tunnel này.
 
 ## 5. Cả nhóm đăng ký trên cùng HTTPS
 
-A gửi URL cho B/C. Tất cả mở cùng URL, kể cả A. Kiểm tra /api/health trên URL chung. B/C không mở localhost của mình. Mỗi người dùng tài khoản riêng, một tab lớp học và tai nghe. Cho phép mic của site khi được hỏi.
+A đăng ký trước tài khoản `qaadmin`, `qateacher`, `qastudent1`, `qastudent2` (và `qateacher2` nếu thử chuyển chủ lớp). Dừng Java, sau đó khởi động lại như bước 4 với `--grant-admin=qaadmin`; đây là tài khoản thử, không dùng tài khoản dữ liệu thật. Admin dùng dashboard cấp quyền Teacher cho `qateacher` (và `qateacher2` nếu cần). A gửi URL HTTPS cho B/C; tất cả mở cùng URL, kể cả A. Kiểm tra `/api/health` trên URL chung. B/C không mở localhost của mình. Mỗi người dùng tài khoản riêng, một tab lớp học và tai nghe. Cho phép mic của site khi được hỏi.
 
 Username 3–32 ký tự, bắt đầu bằng chữ, sau đó chữ/số/gạch dưới. Mật khẩu tối thiểu 8 ký tự có chữ hoa, chữ thường, số và ký tự đặc biệt. Dùng tài khoản và tài liệu thử riêng.
 
 ## 6. Tạo lớp và thêm người học
 
-1. A đăng nhập, Tạo lớp “PBL4 – Test nhóm”, Mở lớp để xem trang các buổi học.
-2. A mở Quản lý lớp, copy mã lớp gửi B.
-3. B chọn Nhập mã lớp và gửi yêu cầu. Chưa được vào khi chưa được duyệt.
-4. A duyệt B. Dashboard B tự cập nhật khoảng 5 giây khi đang mở; có thể bấm Làm mới. B bấm Mở lớp.
-5. C đăng ký xong báo username; A dùng Thêm học viên với username C. C được vào ngay.
-6. A bấm Bắt đầu buổi học; B/C bấm Vào buổi học trên trang lớp. Cả nhóm phải thấy kết nối media thành công trước khi thử mic.
+1. Admin đăng nhập, nâng `qateacher` thành Teacher, tạo lớp “PBL4 – Test nhóm” và chỉ định `qateacher` làm chủ lớp.
+2. Teacher đăng nhập, mở lớp, copy mã mời gửi Student.
+3. Student chọn Nhập mã lớp và gửi yêu cầu. Chưa được vào khi chưa được duyệt.
+4. Teacher duyệt Student. Dashboard Student tự cập nhật khoảng 5 giây khi đang mở; có thể bấm Làm mới. Student bấm Mở lớp.
+5. Teacher có thể thêm Student thứ hai trực tiếp bằng username; tài khoản đó vào lớp ngay.
+6. Teacher bấm Bắt đầu buổi học; Student bấm Vào buổi học trên trang lớp. Cả nhóm phải thấy kết nối media thành công trước khi thử mic.
 
 ## 7. Test voice
 
-1. Cả nhóm Bật loa. A Bật mic đếm 1–10, B/C xác nhận nghe.
-2. A tắt mic, giữ loa; B nói, A/C xác nhận. Đổi lượt cho C.
-3. A/B nói luân phiên rồi đồng thời ngắn; C xác nhận nghe cả hai.
+1. Cả nhóm Bật loa. Teacher bật mic đếm 1–10, Student xác nhận nghe.
+2. Teacher tắt mic, giữ loa; Student bật mic nói, Teacher xác nhận nghe. Đổi lượt giữa các Student.
+3. Teacher/Student nói luân phiên rồi đồng thời ngắn; xác nhận nghe được cả hai chiều.
 4. Giữ buổi 15 phút, mỗi phút đổi người nói. Ghi nhận mất tiếng một chiều, trễ, đứt tiếng. Kết nối lúc đầu chưa đủ để đánh dấu voice đạt.
 
 ## 8. Test share và điều hành
 
-1. A mở PowerPoint/PDF hoặc tab tài liệu riêng. Chia sẻ bài giảng và chọn nguồn đó. Tránh desktop hoặc cửa sổ chứa lớp học để tránh phản chiếu. B/C thấy nội dung thay đổi, vẫn nói/nghe hai chiều.
-2. A Dừng chia sẻ; thử lại và dừng từ thanh browser. Hủy picker không được làm ngắt mic/loa.
-3. B Xin chia sẻ màn hình. A Xem yêu cầu / Trong phòng & điều hành → Duyệt chia sẻ. B tự bấm Chia sẻ bài giảng, chọn tài liệu.
-4. A Dừng người đang chia sẻ. B không được share lại khi chưa được cấp quyền mới. A Mời trình bày C, C tự chọn nguồn. Chỉ một người trình bày tại một thời điểm.
-5. A Khóa mic học viên cả lớp. B/C dừng mic, A vẫn nói được. B Xin phát biểu, A Duyệt phát biểu; B tự bật mic, C vẫn bị khóa.
-6. A Thu hồi quyền mic B rồi Mở quyền mic cả lớp. Thử Khóa mic riêng B, C vẫn nói; Mở mic riêng để B tự bật lại. Mở quyền không tự bật phần cứng mic.
-7. A rời tạm: quyền mic hiện tại được giữ; yêu cầu mới cần chờ A quay lại. Quyền tạm thời có thể reset khi người được cấp rời/vào lại.
+1. Teacher mở PowerPoint/PDF hoặc tab tài liệu riêng, bấm Chia sẻ bài giảng và chọn nguồn đó. Tránh desktop/cửa sổ chứa lớp để tránh phản chiếu. Student thấy nội dung thay đổi, âm thanh vẫn hai chiều.
+2. Teacher dừng chia sẻ; thử lại và dừng từ thanh browser. Hủy picker không được làm ngắt mic/loa.
+3. Student xin chia sẻ màn hình. Teacher mở Trong phòng & điều hành → duyệt chia sẻ. Student tự bấm Chia sẻ bài giảng và chọn tài liệu.
+4. Teacher dừng người đang chia sẻ. Student không được share lại khi chưa được cấp quyền mới. Teacher mời Student khác trình bày; mỗi lần chỉ một người chia sẻ.
+5. Teacher khóa mic học viên cả lớp. Student dừng mic; Teacher vẫn nói được. Student xin phát biểu, Teacher duyệt; người được duyệt tự bật mic.
+6. Teacher thu hồi quyền mic của một Student rồi mở mic cả lớp; thử khóa mic riêng. Mở quyền không tự bật phần cứng mic.
+7. Teacher rời tạm: quyền mic hiện tại được giữ; yêu cầu mới cần chờ Teacher quay lại. Quyền tạm thời có thể reset khi người được cấp rời/vào lại.
 
 ## 9. Test vòng đời
 
 1. B Rời buổi học rồi vào lại: vẫn là thành viên.
 2. B tắt mạng 10 giây rồi bật: UI nhận biết ngắt, dừng media cũ; kết nối/vào lại, tự bật mic/loa, kiểm tra hai chiều.
-3. A Kết thúc buổi học và xác nhận: tất cả media dừng, trở về trang lớp với thẻ Đã kết thúc, thời gian/thời lượng và Xem tin nhắn; B chưa kết nối media được khi buổi đóng.
-4. A Bắt đầu buổi mới; B/C vẫn ở trang lớp, chủ động bấm Vào buổi học rồi tự bật media. Chat buổi mới trống, chat buổi cũ vẫn xem được ở đúng thẻ.
-5. A xóa B khỏi lớp: B bị ngắt và không thể kết nối lại bằng quyền cũ. Thêm/duyệt lại để vào.
-6. B Rút khỏi lớp: mất membership, cần được thêm/duyệt lại. Lưu trữ lớp chỉ thử ở lớp dùng một lần; không dùng để kết thúc buổi, chưa có UI khôi phục lưu trữ.
-7. B tạo lớp khác, A tham gia: B là chủ lớp mới, A là thành viên, chứng minh quyền theo lớp.
+3. Teacher kết thúc buổi học và xác nhận: media dừng, trở về trang lớp với thẻ đã kết thúc và lịch sử; Student chưa thể kết nối media khi buổi đóng.
+4. Teacher bắt đầu buổi mới; Student chủ động bấm Vào buổi học rồi bật media. Chat buổi mới trống, chat buổi cũ vẫn xem được ở đúng thẻ.
+5. Teacher xóa một Student khỏi lớp: Student bị ngắt và không thể kết nối lại bằng quyền cũ. Thêm/duyệt lại để vào.
+6. Student rút khỏi lớp: mất membership, cần được thêm/duyệt lại. Chỉ thử lưu trữ trên lớp QA dùng một lần; không dùng thao tác này để kết thúc buổi.
+7. Nếu đã tạo `qateacher2`, Admin cấp role Teacher rồi đổi chủ lớp QA sang người này. Xác nhận quyền quản lý theo owner; Student không thể tự tạo lớp.
 
 ## 10. Xử lý lỗi và ghi kết quả
 

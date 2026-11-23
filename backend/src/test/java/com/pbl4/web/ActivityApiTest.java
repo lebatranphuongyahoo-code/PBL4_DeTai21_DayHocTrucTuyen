@@ -30,6 +30,7 @@ class ActivityApiTest {
         String suffix=Long.toString(System.nanoTime());
         String teacherName="teach"+suffix,studentName="stud"+suffix,outsideName="out"+suffix;
         for(String name:new String[]{teacherName,studentName,outsideName})auth.register(new AuthService.Registration(name,name,"Strong!23",null));
+        TestAccounts.asTeacher(db,teacherName);
         var teacher=auth.login(new AuthService.Login(teacherName,"Strong!23"));
         var student=auth.login(new AuthService.Login(studentName,"Strong!23"));
         var outside=auth.login(new AuthService.Login(outsideName,"Strong!23"));
