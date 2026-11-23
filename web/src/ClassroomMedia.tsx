@@ -269,8 +269,21 @@ export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meeting
     if (text && connected && socket.current?.readyState === WebSocket.OPEN) { socket.current.send(JSON.stringify({ type: 'chat', text })); setDraft(''); }
   }
   return <div className="classroom-media"><h1 className="visually-hidden">{roomName}</h1>
-    <div className="meeting-status" role="status"><span>{status}</span>{!connected&&!meetingEnded&&<button className="ghost-button" onClick={()=>setAttempt(x=>x+1)}>Kết nối lại</button>}</div>
-    <div className="classroom-notices">{owned&&meetingOpen&&<div className="request-alert"><button className="ghost-button danger" disabled={meetingBusy} onClick={()=>{if(confirm("Kết thúc buổi học sẽ ngắt media của tất cả người tham gia. Lớp và danh sách thành viên vẫn được giữ. Tiếp tục?"))onMeetingChange(false);}}>Kết thúc buổi học</button></div>}{meetingEnded&&<div className="request-alert"><strong>Buổi học chưa bắt đầu hoặc đã kết thúc. Lớp và danh sách thành viên vẫn được giữ.</strong>{owned?<button className="ghost-button" disabled={meetingBusy} onClick={()=>onMeetingChange(true)}>Bắt đầu buổi học</button>:<button className="ghost-button" disabled={meetingBusy} onClick={onCheckMeeting}>Kiểm tra buổi học</button>}</div>}{connected&&!owned&&!ownerPresent&&<p role="status" className="owner-absent">Chủ lớp đang vắng mặt. Buổi học tự kết thúc nếu chủ lớp không kết nối lại trong 10 phút; yêu cầu mới cần chờ chủ lớp.</p>}{decision&&<p role="status">{decision}</p>}{owned&&pending.length>0&&<div className="request-alert" role="status"><strong>{pending.length} người đang chờ duyệt chia sẻ hoặc phát biểu</strong><button className="ghost-button" onClick={()=>setSidebarTab('people')}>Xem yêu cầu ({pending.length})</button></div>}</div>
+    <div className="meeting-top">
+      <header className="meeting-heading">
+        <div className="meeting-status">
+          <span role="status">{status}</span>
+          {!connected&&!meetingEnded&&<button className="ghost-button" onClick={()=>setAttempt(x=>x+1)}>Kết nối lại</button>}
+        </div>
+        {owned&&meetingOpen&&<button className="ghost-button danger end-meeting-button" disabled={meetingBusy} onClick={()=>{if(confirm("Kết thúc buổi học sẽ ngắt media của tất cả người tham gia. Lớp và danh sách thành viên vẫn được giữ. Tiếp tục?"))onMeetingChange(false);}}>Kết thúc buổi học</button>}
+      </header>
+      <div className="classroom-notices">
+        {meetingEnded&&<div className="request-alert"><strong>Buổi học chưa bắt đầu hoặc đã kết thúc. Lớp và danh sách thành viên vẫn được giữ.</strong>{owned?<button className="ghost-button" disabled={meetingBusy} onClick={()=>onMeetingChange(true)}>Bắt đầu buổi học</button>:<button className="ghost-button" disabled={meetingBusy} onClick={onCheckMeeting}>Kiểm tra buổi học</button>}</div>}
+        {connected&&!owned&&!ownerPresent&&<p role="status" className="owner-absent">Chủ lớp đang vắng mặt. Buổi học tự kết thúc nếu chủ lớp không kết nối lại trong 10 phút; yêu cầu mới cần chờ chủ lớp.</p>}
+        {decision&&<p role="status">{decision}</p>}
+        {owned&&pending.length>0&&<div className="request-alert" role="status"><strong>{pending.length} người đang chờ duyệt chia sẻ hoặc phát biểu</strong><button className="ghost-button" onClick={()=>setSidebarTab('people')}>Xem yêu cầu ({pending.length})</button></div>}
+      </div>
+    </div>
     <section className="media-panel lecture-panel" ref={stage}>
       <div className="stage-label"><span className={connected ? 'live-dot connected' : 'live-dot'}/>{connected ? 'Đã kết nối' : 'Chưa kết nối'}</div>
       <div className="stage-course"><span className="avatar">{ownerName.slice(0,2).toUpperCase()}</span><div><strong>{roomName}</strong><small>{ownerName} · Chủ lớp</small></div></div>
