@@ -1,103 +1,39 @@
-# KỊCH BẢN DEMO — PBL4 Đề tài 21 (Dạy học trực tuyến)
+# Kịch bản demo 5 phút — PBL4 Đề tài 21
 
-> Mục tiêu: trong **5 phút** cho giảng viên thấy (1) chương trình chạy được thật,
-> (2) đa luồng + đồng bộ nằm ở đâu, (3) nhóm đang ở đâu và còn thiếu gì.
-> Người trình bày phải **tự bấm lại toàn bộ kịch bản ít nhất 1 lần** trước buổi demo.
+## Chuẩn bị
 
-## 0. Chuẩn bị (làm trước, không làm trong giờ demo)
-
-```bash
-mvn -q clean package
+```powershell
+./scripts/build-web.ps1
+java -jar backend/target/classroom-web-server-0.1.0.jar
 ```
 
-Lệnh này tạo **jar đủ thư viện** (~12 MB, đã gộp `sqlite-jdbc`).
-Dùng `target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar`.
-**Không** dùng `original-*.jar` — bản đó thiếu driver, server sập ngay khi mở.
+Mở `http://127.0.0.1:8081`. Tạo ba tài khoản, sau đó dừng server một lần để cấp quyền vận hành:
 
-Mở **hai** cửa sổ dòng lệnh tại thư mục dự án:
-
-```bash
-# CUA SO 1 — server
-java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar
+```powershell
+java -jar backend/target/classroom-web-server-0.1.0.jar --grant-teacher=teacher_demo --grant-admin=admin_demo
 ```
 
-Chờ tới khi thấy `===== SERVER DANG CHAY =====` và `Cho ket noi...` rồi mới mở client.
+Đăng nhập lại sau khi cấp quyền.
 
-```bash
-# CUA SO 2 — client giao dien (mo 2 lan: 1 giao vien, 1 hoc sinh)
-java -jar target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar client
-```
+## Trình tự trình bày
 
-Cách chạy cũ vẫn dùng được: `java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.client.ui.LoginUI`.
-
-Nếu client ở **máy khác**: chép jar sang, rồi thêm IP máy server:
-
-```bash
-java -jar pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar client 192.168.1.10 9000
-```
-
-## 1. Kịch bản 5 phút
-
-| # | Làm gì | Nói gì |
+| Bước | Thao tác | Điểm cần giải thích |
 |---|---|---|
-| 1 | Chỉ cửa sổ server: `TCP 9000`, `UDP 9001`, `Pool: 50 luong` | "Server một tiến trình, hai cổng: TCP cho điều khiển và ảnh, UDP riêng cho tiếng. Bể 50 luồng." |
-| 2 | Client 1: chọn **Giáo viên**, nhập tên + mật khẩu, bấm **Đăng ký** rồi **Đăng nhập** | "Đăng ký/đăng nhập lưu SQLite. Mật khẩu được băm SHA-256 **ở client** trước khi gửi." |
-| 3 | Ở màn hình Home: nhập tên lớp, bấm **Tạo lớp** → ra mã 6 chữ số | "Giáo viên tạo lớp, server cấp mã 6 chữ số." |
-| 4 | Client 2: chọn **Học sinh**, đăng ký + đăng nhập, chọn lớp vừa tạo, bấm **Tham gia** | "Học sinh vào bằng mã lớp. Danh sách thành viên cập nhật hai bên." |
-| 5 | Client 1 (giáo viên): bấm **Chia sẻ màn hình** | "Client tự chụp bằng `Robot`, nén JPEG 10 hình/giây, gửi TCP. Server **chỉ chuyển tiếp**, không chụp không nén." |
-| 6 | Chỉ cửa sổ học sinh: ảnh đang đổ | "Học sinh nhận frame và vẽ lên giao diện." |
-| 7 | Client 1: bấm **Bật Mic**; client 2: nói/nghe | "Thoại đi UDP 9001, gói 648 byte = 20 ms tiếng. Mỗi bên có luồng nhận riêng và jitter buffer." |
-| 8 | Gõ vài dòng **chat** hai chiều | "Chat chữ đi chung kênh điều khiển TCP. **Tên người gửi do server gắn vào trước khi phát**, client không giả mạo được." |
-| 9 | Bấm **Rời phòng** ở học sinh | "Rời lớp thì về **trang chủ, giữ nguyên kết nối** — không phải đăng nhập lại; server cập nhật danh sách; lớp rỗng thì tự xoá khỏi bộ nhớ." |
+| 1 | Admin mở dashboard và lọc lớp đang hoạt động | Admin là cấp quản lý toàn hệ thống; UI gọi `/api/admin/*`. |
+| 2 | Teacher tạo lớp, mở quản lý lớp và gửi mã mời | Chủ lớp là owner theo quan hệ lớp, không phải quyền global. |
+| 3 | Student nhập mã, Teacher duyệt yêu cầu | Backend kiểm tra membership; người ngoài không đọc được lớp. |
+| 4 | Teacher bắt đầu buổi học; Student vào phòng | Buổi học có session riêng; join/leave chỉ ghi lịch sử kết nối kỹ thuật. |
+| 5 | Hai người dùng chat, xin phát biểu, bật/tắt mic hoặc chia sẻ màn hình | WebSocket server relay theo phòng; không gọi WebRTC/P2P. |
+| 6 | Teacher mở Bài tập tương tác, đăng câu hỏi chữ | Nội dung và giới hạn độ dài được kiểm tra ở service. |
+| 7 | Student nộp câu trả lời; Teacher xem, chấm 0–10 và gửi phản hồi | Đây là tương tác học tập; Student chỉ thấy bài của mình, Teacher thấy bài thành viên. |
+| 8 | Admin lưu trữ lớp; thử mở lại bằng Student | Lớp archived bị chặn; Admin khôi phục được và thành viên vẫn còn. |
 
-**Lưu ý khi demo trên MỘT máy:** ảnh chia sẻ là ảnh của chính màn hình đang mở, nên trông
-lồng nhau — đó là điều bình thường, không phải lỗi. Âm thanh nên đeo tai nghe hoặc giảm
-volume để tránh vọng. Nếu có 2 máy thì demo 2 máy sẽ rõ hơn hẳn.
+## Khi thầy hỏi thuật toán
 
-## 2. Khi giảng viên hỏi "đa luồng và đồng bộ ở đâu"
+Trả lời: “Thuật toán lõi là relay/fan-out theo phòng. Server xác thực ticket và membership, kiểm tra quyền mic/presenter, rồi đưa packet vào hàng đợi giới hạn riêng của từng peer. Peer chậm bị ngắt khi queue vượt ngưỡng. Với `n` người, mỗi packet được chuyển tối đa `n-1` lần nên chi phí là `O(n)`.”
 
-Đây là yêu cầu bắt buộc của đề, phải chỉ được **bằng chứng**, không nói suông.
+Không gọi phần này là Minimax/Max-min khi chưa có yêu cầu hoặc triển khai tương ứng. Không trình bày lịch sử kết nối như báo cáo điểm danh.
 
-1. **Chỉ console server**: dòng `[stats] luong dang song=...` — số luồng tăng khi có client.
-2. **Nói 3 điểm này** (đúng với code):
-   - Mỗi client có **hai** luồng: một luồng xử lý trong bể + một luồng ghi riêng
-     `srv-writer-N` ⇒ không bao giờ hai luồng cùng ghi một socket.
-   - Mỗi `Room` có `ReentrantLock` riêng. Luật vàng: **sao chép dữ liệu trong khoá →
-     nhả khoá → rồi mới gửi**. Gửi trong khoá thì cả lớp chờ một người mạng chậm.
-   - Hai hàng đợi: **điều khiển không bao giờ bỏ gói**, **frame sức chứa 2, đầy thì vứt
-     frame cũ nhất** ⇒ một học sinh mạng chậm không kéo đứng cả lớp.
-3. **Chạy bài kiểm thử tự động** nếu còn thời gian:
+## Dữ liệu dự phòng
 
-```bash
-java -cp target/pbl4-de-tai-21-day-hoc-truc-tuyen-1.0.0.jar com.pbl4.tools.T0Demo
-```
-
-Kỳ vọng: `KET QUA: 20 DAT / 20 TONG`. Bài này tự dựng server + 1 giáo viên + 3 học sinh,
-đo cả tỉ lệ mất gói thoại.
-
-## 3. Nhóm đang ở đâu (nói thẳng, không né)
-
-**Đã xong:**
-- Server đa luồng + giao thức 19 loại gói, tạo/vào/rời lớp, relay thoại, 4 handler nghiệp vụ (TV1).
-- Client media: mic, loa, jitter buffer, chụp + nén màn hình, `AudioSession` gom socket+mic+loa (TV2).
-- CSDL SQLite (interface `DatabaseManager` + bản SQLite thật) + giao diện đăng nhập, trang chủ, phòng học (TV3).
-- Đã hoàn tất refactor "chuẩn hoá cấu trúc" (Bước 0–7 của `KE_HOACH_REFACTOR.md`): sửa 8 lỗi B0–B8,
-  **59 test JUnit 0 lỗi**, `T0Demo` 20/20, `TV2Chang2Test` 17/17.
-
-**Chưa xong:**
-- 4.2 Thí nghiệm so sánh "giữ khoá khi gửi" vs "nhả khoá trước khi gửi" (bảng số liệu).
-- 4.3 Chương báo cáo. 4.4 Slide. Smoke GUI 14 bước trong `KE_HOACH_REFACTOR.md` 9.2 (cần người bấm thật).
-- Chưa thử thoại/màn hình giữa **nhiều máy thật** — mới chạy trên một máy.
-
-## 4. Phương án dự phòng
-
-| Hỏng gì | Làm gì |
-|---|---|
-| Server báo `No suitable driver found for jdbc:sqlite` | Đang chạy nhầm `original-*.jar`. Chạy lại bằng jar 12 MB. |
-| `Address already in use` | Server cũ còn chạy. Đóng cửa sổ server cũ rồi mở lại. |
-| Client không kết nối được | Server chưa in `Cho ket noi...`, hoặc sai IP/cổng, hoặc tường lửa chặn TCP 9000. |
-| Vào lớp được nhưng **không nghe tiếng** | UDP 9001 bị chặn (2 máy), hoặc chưa bấm **Bật Mic** ở phía nói. |
-| Vào lớp bị báo `Lop dang dong, vui long thu lai` | Lớp vừa có người cuối rời (đang được dọn). **Bấm Tham gia lần nữa** là vào được. |
-| Đăng ký bị báo tên/mat khau khong hop le | Tên phải 2–32 ký tự: chữ, số, `_` hoặc `.`; mật khẩu đã băm SHA-256 ở client — không gõ hash tay. |
-| Không có mạng / máy khác | Demo 1 máy 2 client vẫn chứng minh được toàn bộ luồng xử lý. |
-| Sập giữa buổi | Chạy `T0Demo` và nói: "phần này nhóm đã kiểm thử tự động 20/20". |
+Nếu không có hai máy thật, chạy backend test và frontend test/build để chứng minh quyền, relay, chat và vòng đời UI. Ghi rõ đây là kiểm thử tự động; chưa thay thế nghiệm thu mạng thật và không được bịa số latency hoặc CPU/RAM.

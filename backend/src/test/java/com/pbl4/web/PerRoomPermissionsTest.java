@@ -15,6 +15,7 @@ class PerRoomPermissionsTest {
             db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE accounts SET role='TEACHER' WHERE username='bobby'");}return null;});
             var alice=db.findAccount("alice");var bob=db.findAccount("bobby");var outsider=db.findAccount("outsider");
             var a=rooms.create(alice,"Alice teaches");var b=rooms.create(bob,"Bob teaches");roomId=a.id();aliceId=alice.id();
+            rooms.setMeeting(alice,a.id(),true);rooms.setMeeting(bob,b.id(),true);
             rooms.requestJoin(bob,a.inviteCode());rooms.review(alice,a.id(),bob.id(),true);
             rooms.add(bob,b.id(),"alice");
             assertTrue(rooms.mediaAccess(alice,a.id()));assertFalse(rooms.mediaAccess(bob,a.id()));
@@ -38,7 +39,7 @@ class PerRoomPermissionsTest {
         var reopened=new Database(path);try {
             var rooms=new ClassroomService(reopened);var alice=reopened.findAccount("alice");
             assertEquals(aliceId,alice.id());assertTrue(rooms.detail(alice,roomId).owned());
-            assertTrue(rooms.mediaAccess(alice,roomId));
+            assertFalse(rooms.isMeetingOpen(roomId));rooms.setMeeting(alice,roomId,true);assertTrue(rooms.mediaAccess(alice,roomId));
             assertTrue(new AuthService(reopened).login(new AuthService.Login("alice","Strong!23")).user().role().equals("USER"));
         } finally {reopened.close();}
     }

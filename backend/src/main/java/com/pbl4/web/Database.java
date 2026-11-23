@@ -15,6 +15,8 @@ import jakarta.annotation.PreDestroy;
 public class Database {
     public record Account(long id, String username, String displayName, String passwordHash, String role) {}
     public record Classroom(long id, String name, int members, boolean owned) {}
+    public record AdminClassroom(long id, String name, long ownerId, String ownerUsername, String ownerDisplayName,
+                                 int members, String status, long createdAt) {}
     private final Connection connection;
     @FunctionalInterface interface Transaction<T> { T execute(Connection connection) throws SQLException; }
     synchronized <T> T transaction(Transaction<T> work) throws SQLException {
@@ -50,9 +52,58 @@ public class Database {
                     }
                     s.executeUpdate("INSERT INTO schema_versions VALUES (1, strftime('%s','now'))");
                 }
-                s.execute("CREATE TABLE IF NOT EXISTS classroom_meetings(classroom_id INTEGER PRIMARY KEY REFERENCES classrooms(id) ON DELETE CASCADE, is_open INTEGER NOT NULL DEFAULT 1 CHECK(is_open IN (0,1)))");
+                s.execute("CREATE TABLE IF NOT EXISTS classroom_meetings(classroom_id INTEGER PRIMARY KEY REFERENCES classrooms(id) ON DELETE CASCADE, is_open INTEGER NOT NULL DEFAULT 0 CHECK(is_open IN (0,1)))");
                 s.execute("INSERT OR IGNORE INTO classroom_meetings(classroom_id) SELECT id FROM classrooms");
                 s.execute("INSERT OR IGNORE INTO schema_versions VALUES(2,strftime('%s','now'))");
+                boolean historyApplied;
+                try (ResultSet rs = s.executeQuery("SELECT version FROM schema_versions WHERE version=3")) { historyApplied = rs.next(); }
+                if (!historyApplied) {
+                    s.execute("CREATE TABLE meeting_sessions(id INTEGER PRIMARY KEY, classroom_id INTEGER NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE, started_at INTEGER NOT NULL, ended_at INTEGER)");
+                    s.execute("CREATE UNIQUE INDEX meeting_sessions_open ON meeting_sessions(classroom_id) WHERE ended_at IS NULL");
+                    // Existing open meetings are recorded from migration time, not their unknown original start.
+                    s.execute("INSERT INTO meeting_sessions(classroom_id,started_at) SELECT classroom_id,CAST(strftime('%s','now') AS INTEGER)*1000 FROM classroom_meetings WHERE is_open=1");
+                    s.execute("INSERT INTO schema_versions VALUES(3,strftime('%s','now'))");
+                }
+                boolean attendanceApplied;
+                try (ResultSet rs = s.executeQuery("SELECT version FROM schema_versions WHERE version=4")) { attendanceApplied=rs.next(); }
+                if (!attendanceApplied) {
+                    s.execute("ALTER TABLE meeting_sessions ADD COLUMN start_uncertain INTEGER NOT NULL DEFAULT 1");
+                    s.execute("CREATE TABLE meeting_connections(id INTEGER PRIMARY KEY, session_id INTEGER NOT NULL REFERENCES meeting_sessions(id) ON DELETE CASCADE, account_id INTEGER NOT NULL REFERENCES accounts(id), joined_at INTEGER NOT NULL, left_at INTEGER, interrupted INTEGER NOT NULL DEFAULT 0)");
+                    s.execute("CREATE INDEX meeting_connections_session ON meeting_connections(session_id,id)");
+                    s.execute("INSERT INTO schema_versions VALUES(4,strftime('%s','now'))");
+                }
+                s.execute("CREATE TABLE IF NOT EXISTS meeting_microphone_blocks(session_id INTEGER NOT NULL REFERENCES meeting_sessions(id) ON DELETE CASCADE, username TEXT NOT NULL, PRIMARY KEY(session_id,username))");
+                s.execute("CREATE TABLE IF NOT EXISTS class_messages(id INTEGER PRIMARY KEY, classroom_id INTEGER NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE, account_id INTEGER NOT NULL REFERENCES accounts(id), body TEXT NOT NULL CHECK(length(body) BETWEEN 1 AND 500), sent_at INTEGER NOT NULL)");
+                s.execute("CREATE INDEX IF NOT EXISTS class_messages_room ON class_messages(classroom_id,id)");
+                s.execute("CREATE INDEX IF NOT EXISTS meeting_connections_account ON meeting_connections(session_id,account_id,joined_at)");
+                boolean leaseApplied;
+                try(ResultSet rs=s.executeQuery("SELECT version FROM schema_versions WHERE version=5")){leaseApplied=rs.next();}
+                if(!leaseApplied){
+                    s.execute("ALTER TABLE meeting_sessions ADD COLUMN owner_seen_at INTEGER NOT NULL DEFAULT 0");
+                    s.execute("ALTER TABLE meeting_sessions ADD COLUMN end_reason TEXT");
+                    s.execute("INSERT INTO schema_versions VALUES(5,strftime('%s','now'))");
+                }
+                boolean chatSessionApplied;
+                try(ResultSet rs=s.executeQuery("SELECT version FROM schema_versions WHERE version=6")){chatSessionApplied=rs.next();}
+                if(!chatSessionApplied){
+                    // Older messages have no reliable meeting identity; keep them unassigned.
+                    s.execute("ALTER TABLE class_messages ADD COLUMN session_id INTEGER REFERENCES meeting_sessions(id)");
+                    s.execute("CREATE INDEX class_messages_session ON class_messages(classroom_id,session_id,id)");
+                    s.execute("INSERT INTO schema_versions VALUES(6,strftime('%s','now'))");
+                }
+                boolean activitiesApplied;
+                try(ResultSet rs=s.executeQuery("SELECT version FROM schema_versions WHERE version=7")){activitiesApplied=rs.next();}
+                if(!activitiesApplied){
+                    s.execute("CREATE TABLE class_activities(id INTEGER PRIMARY KEY, classroom_id INTEGER NOT NULL REFERENCES classrooms(id) ON DELETE CASCADE, title TEXT NOT NULL CHECK(length(title) BETWEEN 2 AND 120), prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 2000), created_at INTEGER NOT NULL)");
+                    s.execute("CREATE INDEX class_activities_room ON class_activities(classroom_id,id)");
+                    s.execute("CREATE TABLE activity_submissions(id INTEGER PRIMARY KEY, activity_id INTEGER NOT NULL REFERENCES class_activities(id) ON DELETE CASCADE, account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, answer TEXT NOT NULL CHECK(length(answer) BETWEEN 1 AND 5000), submitted_at INTEGER NOT NULL, score INTEGER CHECK(score BETWEEN 0 AND 10), feedback TEXT, reviewed_at INTEGER, UNIQUE(activity_id,account_id))");
+                    s.execute("CREATE INDEX activity_submissions_activity ON activity_submissions(activity_id,submitted_at)");
+                    s.execute("INSERT INTO schema_versions VALUES(7,strftime('%s','now'))");
+                }
+                // Open records from the previous server process have an unknown departure time.
+                s.execute("UPDATE meeting_connections SET interrupted=1 WHERE left_at IS NULL AND interrupted=0");
+                s.execute("UPDATE meeting_sessions SET ended_at=CAST(strftime('%s','now') AS INTEGER)*1000,end_reason='SERVER_RESTART' WHERE ended_at IS NULL");
+                s.execute("UPDATE classroom_meetings SET is_open=0 WHERE is_open=1");
                 opened.commit();
             } catch (Exception e) { opened.rollback(); throw e; }
             opened.setAutoCommit(true);
@@ -63,6 +114,14 @@ public class Database {
     public synchronized boolean createStudent(String username, String displayName, String hash) throws SQLException {
         try (PreparedStatement s = connection.prepareStatement("INSERT INTO accounts(username,display_name,password_hash,role,created_at) VALUES (?,?,?,'STUDENT',?) ON CONFLICT(username) DO NOTHING")) {
             s.setString(1, username); s.setString(2, displayName); s.setString(3, hash); s.setLong(4, System.currentTimeMillis());
+            return s.executeUpdate() == 1;
+        }
+    }
+    /** Only the local operator command calls this; public registration always creates students. */
+    public synchronized boolean setRole(String username, String role) throws SQLException {
+        if (!List.of("STUDENT", "TEACHER", "ADMIN").contains(role)) throw new IllegalArgumentException("Unsupported role");
+        try (PreparedStatement s = connection.prepareStatement("UPDATE accounts SET role=? WHERE username=? AND status='ACTIVE'")) {
+            s.setString(1, role); s.setString(2, username == null ? "" : username.strip());
             return s.executeUpdate() == 1;
         }
     }
@@ -97,6 +156,17 @@ public class Database {
             s.setLong(1,accountId); s.setLong(2,accountId);
             var result = new ArrayList<Classroom>();
             try (ResultSet rs = s.executeQuery()) { while(rs.next()) result.add(new Classroom(rs.getLong(1),rs.getString(2),rs.getInt(3),rs.getLong(4)==accountId)); }
+            return result;
+        }
+    }
+    public synchronized List<AdminClassroom> listAdminClassrooms() throws SQLException {
+        String sql = "SELECT c.id,c.name,c.owner_id,o.username,o.display_name,"+
+            "(SELECT count(*) FROM classroom_members m WHERE m.classroom_id=c.id),c.status,c.created_at "+
+            "FROM classrooms c JOIN accounts o ON o.id=c.owner_id ORDER BY c.id";
+        try (PreparedStatement s = connection.prepareStatement(sql); ResultSet rs = s.executeQuery()) {
+            var result = new ArrayList<AdminClassroom>();
+            while (rs.next()) result.add(new AdminClassroom(rs.getLong(1), rs.getString(2), rs.getLong(3),
+                rs.getString(4), rs.getString(5), rs.getInt(6), rs.getString(7), rs.getLong(8)));
             return result;
         }
     }

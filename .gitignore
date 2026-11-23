@@ -40,4 +40,6 @@ dist/
 .cache/
 *.db-wal
 *.db-shm
+.ua/
+docs/qa-agent-browser/
 

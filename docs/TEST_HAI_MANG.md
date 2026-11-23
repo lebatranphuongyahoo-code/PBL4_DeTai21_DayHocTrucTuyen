@@ -1,121 +1,92 @@
-# Test hai máy ở hai mạng khác nhau
+# Test cả nhóm ở các mạng khác nhau
 
-Máy A (bạn) chạy Java server và cloudflared. Máy B (bạn cùng nhóm) dùng Chrome/Edge mở cùng URL HTTPS. Không chạy hai server riêng rồi mong thấy cùng lớp: SQLite/membership/media nằm trên server chung.
+Máy A chạy một Java server và một tunnel. B/C chỉ cần Chrome/Edge, tai nghe và URL HTTPS của A; không chạy server riêng. Public registration không chọn role. Người vận hành cấp một tài khoản ADMIN và một tài khoản TEACHER bằng CLI; Admin quản lý lớp, Teacher điều hành buổi học. Người được thêm/duyệt là thành viên và có thể xin quyền trình bày.
 
-## 1. Kéo source
+## 1. Chuẩn bị trên máy A
 
-Clone vào thư mục mới để không ảnh hưởng checkout có chỉnh sửa:
+Trong VS Code, mở thư mục E:/PBL4_DeTai21. Nếu cần cập nhật/build, dừng JAR cũ bằng Ctrl+C trước. Kiểm tra git status --short và git branch --show-current. Nhánh dùng là web-rebuild. Nếu có thay đổi chưa lưu, không reset hoặc checkout ép; giữ thay đổi và xử lý trước khi pull. Checkout sạch có thể chạy git pull --ff-only origin web-rebuild.
 
-```powershell
-git clone --branch web-rebuild --single-branch https://github.com/lebatranphuongyahoo-code/PBL4_DeTai21_DayHocTrucTuyen.git PBL4-Web-Test
-cd PBL4-Web-Test
-git branch --show-current
-git log -1 --oneline
-```
+Build: npm --prefix web ci, sau đó ./scripts/build-web.ps1 tại gốc repo. Cần JDK21, Maven3.9+, Node tương thích Vite7 (ví dụ 22.12+). Nếu policy chặn script, chạy npm --prefix web run build rồi mvn -f backend/pom.xml verify. Bản đã build đúng phiên bản có thể bỏ qua.
 
-Máy B có thể kéo source như trên, nhưng để tham gia lớp chỉ cần browser và URL chung. Nếu repo private, chủ repo phải cấp quyền GitHub cho bạn cùng nhóm. Không dùng git reset/checkout ép trên checkout đang có sửa chưa lưu.
+## 2. Terminal 1: chạy server
 
-## 2. Build trên máy A
+    cd E:PBL4_DeTai21
+    java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db
 
-Cài JDK21, Maven3.9+, Node22.12+ (hoặc bản tương thích Vite7), Git. Dừng server JAR cũ trước khi build.
+Mở http://127.0.0.1:8081/api/health, phải thấy ok: true. Luôn dùng cùng thư mục gốc và cùng database khi restart. Nếu port bận, dừng đúng server cũ, không tắt tất cả Java.
 
-```powershell
-java -version
-mvn -version
-node --version
-cd web
-npm ci
-cd ..
-./scripts/build-web.ps1
-```
+## 3. Terminal 2: mở tunnel
 
-Nếu Maven báo cache C:/.m2 không truy cập được, dùng script với -MavenRepository trỏ đến cache của tài khoản Windows hiện tại. Ví dụ máy ADMIN: ./scripts/build-web.ps1 -MavenRepository C:/Users/ADMIN/.m2/repository. Build phải đạt trước khi test. Nếu script PowerShell bị policy chặn, chạy thủ công npm run build trong web rồi mvn -f backend/pom.xml verify ở gốc; không cần hạ execution policy toàn máy.
+    cloudflared tunnel --url http://127.0.0.1:8081
 
-## 3. Khởi động server thử và tạo tài khoản người dạy
+Nếu không tìm thấy lệnh nhưng đã cài tại vị trí mặc định trên máy ADMIN:
 
-Terminal A, giữ thư mục gốc repo:
+    & 'C:Program Files (x86)cloudflaredcloudflared.exe' tunnel --url http://127.0.0.1:8081
 
-```powershell
-java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db
-```
+Copy URL https://...trycloudflare.com thật được in ra. Giữ terminal 2 chạy. URL có thể đổi mỗi lần mở tunnel. Không dùng URL của buổi cũ hoặc URL trang tải cloudflared.
 
-Mở http://127.0.0.1:8081, đăng ký username teacher_test, họ tên rõ ràng, mật khẩu thử riêng đáp ứng chính sách. Chưa phải teacher cho đến bước cấp quyền. Database này riêng với dữ liệu cũ; luôn dùng đúng --app.database=./data/remote-test.db trong mọi lần restart.
+## 4. Terminal 1: cho phép origin media
 
-## 4. Máy A mở tunnel HTTPS tạm
+Ctrl+C dừng Java, giữ tunnel. Điền URL thật, không có dấu / cuối:
 
-Cài cloudflared từ trang chính thức: https://developers.cloudflare.com/tunnel/downloads/ (chọn Windows x64 phù hợp máy). Nếu download file cloudflared-windows-amd64.exe, đổi tên cloudflared.exe; mở PowerShell tại thư mục chứa file đó.
+    $publicUrl = 'https://DIEN-URL-THAT.trycloudflare.com'
+    java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db "--app.allowed-origins=$publicUrl"
 
-Terminal B:
+Không đặt origin là *. Không cần profile LAN hoặc mở port router cho luồng tunnel này.
 
-```powershell
-./cloudflared.exe tunnel --url http://127.0.0.1:8081
-```
+## 5. Cả nhóm đăng ký trên cùng HTTPS
 
-Nếu đã cài và có PATH, dùng cloudflared tunnel --url http://127.0.0.1:8081. Copy URL HTTPS *.trycloudflare.com thật được in ra. URL ví dụ không hoạt động. Giữ terminal B mở. Tunnel là dịch vụ ngoài chuyển tiếp traffic, không thay backend Java. Không cần port forwarding router. URL thay đổi sau mỗi lần tạo tunnel mới.
+A gửi URL cho B/C. Tất cả mở cùng URL, kể cả A. Kiểm tra /api/health trên URL chung. B/C không mở localhost của mình. Mỗi người dùng tài khoản riêng, một tab lớp học và tai nghe. Cho phép mic của site khi được hỏi.
 
-## 5. Cấp teacher và cho phép đúng origin
+Username 3–32 ký tự, bắt đầu bằng chữ, sau đó chữ/số/gạch dưới. Mật khẩu tối thiểu 8 ký tự có chữ hoa, chữ thường, số và ký tự đặc biệt. Dùng tài khoản và tài liệu thử riêng.
 
-Terminal A: Ctrl+C dừng Java. Không dừng terminal B. Khởi động lại cùng DB, thay URL ví dụ bằng URL thật, không có slash cuối:
+## 6. Tạo lớp và thêm người học
 
-```powershell
-$publicUrl = 'https://TEN-THAT.trycloudflare.com'
-java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db --grant-teacher=teacher_test "--app.allowed-origins=$publicUrl"
-```
+1. A đăng nhập, Tạo lớp “PBL4 – Test nhóm”, Mở lớp để xem trang các buổi học.
+2. A mở Quản lý lớp, copy mã lớp gửi B.
+3. B chọn Nhập mã lớp và gửi yêu cầu. Chưa được vào khi chưa được duyệt.
+4. A duyệt B. Dashboard B tự cập nhật khoảng 5 giây khi đang mở; có thể bấm Làm mới. B bấm Mở lớp.
+5. C đăng ký xong báo username; A dùng Thêm học viên với username C. C được vào ngay.
+6. A bấm Bắt đầu buổi học; B/C bấm Vào buổi học trên trang lớp. Cả nhóm phải thấy kết nối media thành công trước khi thử mic.
 
-Chỉ dùng --grant-teacher lần đầu. Lần sau restart bỏ tham số đó (tài khoản đã là teacher, lệnh cấp lại sẽ bị từ chối). Lệnh lần sau:
+## 7. Test voice
 
-```powershell
-java -jar backend/target/classroom-web-server-0.1.0.jar --app.database=./data/remote-test.db "--app.allowed-origins=$publicUrl"
-```
+1. Cả nhóm Bật loa. A Bật mic đếm 1–10, B/C xác nhận nghe.
+2. A tắt mic, giữ loa; B nói, A/C xác nhận. Đổi lượt cho C.
+3. A/B nói luân phiên rồi đồng thời ngắn; C xác nhận nghe cả hai.
+4. Giữ buổi 15 phút, mỗi phút đổi người nói. Ghi nhận mất tiếng một chiều, trễ, đứt tiếng. Kết nối lúc đầu chưa đủ để đánh dấu voice đạt.
 
-Không dùng profile lan cho cách tunnel này: HTTPS do Cloudflare phục vụ, Java loopback vẫn HTTP. Không đặt allowed origins = * để bỏ kiểm tra.
+## 8. Test share và điều hành
 
-## 6. Cả hai dùng cùng URL HTTPS
+1. A mở PowerPoint/PDF hoặc tab tài liệu riêng. Chia sẻ bài giảng và chọn nguồn đó. Tránh desktop hoặc cửa sổ chứa lớp học để tránh phản chiếu. B/C thấy nội dung thay đổi, vẫn nói/nghe hai chiều.
+2. A Dừng chia sẻ; thử lại và dừng từ thanh browser. Hủy picker không được làm ngắt mic/loa.
+3. B Xin chia sẻ màn hình. A Xem yêu cầu / Trong phòng & điều hành → Duyệt chia sẻ. B tự bấm Chia sẻ bài giảng, chọn tài liệu.
+4. A Dừng người đang chia sẻ. B không được share lại khi chưa được cấp quyền mới. A Mời trình bày C, C tự chọn nguồn. Chỉ một người trình bày tại một thời điểm.
+5. A Khóa mic học viên cả lớp. B/C dừng mic, A vẫn nói được. B Xin phát biểu, A Duyệt phát biểu; B tự bật mic, C vẫn bị khóa.
+6. A Thu hồi quyền mic B rồi Mở quyền mic cả lớp. Thử Khóa mic riêng B, C vẫn nói; Mở mic riêng để B tự bật lại. Mở quyền không tự bật phần cứng mic.
+7. A rời tạm: quyền mic hiện tại được giữ; yêu cầu mới cần chờ A quay lại. Quyền tạm thời có thể reset khi người được cấp rời/vào lại.
 
-Máy A và B mở URL thật. Kiểm tra URL/api/health trả ok=true. Máy A login teacher_test. Máy B đăng ký student_test trên URL đó rồi login. Nếu cả hai đã login localhost từ trước, logout/login lại trên HTTPS. Không dùng localhost của máy B để kết nối máy A. Dùng mật khẩu/tài liệu thử riêng: URL tunnel công khai với người biết link, traffic qua Cloudflare; không dùng thông tin nhạy cảm.
+## 9. Test vòng đời
 
-## 7. Test lớp và quyền
+1. B Rời buổi học rồi vào lại: vẫn là thành viên.
+2. B tắt mạng 10 giây rồi bật: UI nhận biết ngắt, dừng media cũ; kết nối/vào lại, tự bật mic/loa, kiểm tra hai chiều.
+3. A Kết thúc buổi học và xác nhận: tất cả media dừng, trở về trang lớp với thẻ Đã kết thúc, thời gian/thời lượng và Xem tin nhắn; B chưa kết nối media được khi buổi đóng.
+4. A Bắt đầu buổi mới; B/C vẫn ở trang lớp, chủ động bấm Vào buổi học rồi tự bật media. Chat buổi mới trống, chat buổi cũ vẫn xem được ở đúng thẻ.
+5. A xóa B khỏi lớp: B bị ngắt và không thể kết nối lại bằng quyền cũ. Thêm/duyệt lại để vào.
+6. B Rút khỏi lớp: mất membership, cần được thêm/duyệt lại. Lưu trữ lớp chỉ thử ở lớp dùng một lần; không dùng để kết thúc buổi, chưa có UI khôi phục lưu trữ.
+7. B tạo lớp khác, A tham gia: B là chủ lớp mới, A là thành viên, chứng minh quyền theo lớp.
 
-1. A tạo lớp Toán - Test hai mạng; B chưa thấy lớp.
-2. A gửi mã lớp trong UI cho B. B nhập mã gửi yêu cầu; chưa được vào.
-3. A vào lớp, Làm mới thành viên/yêu cầu, Duyệt student_test.
-4. B Làm mới danh sách, Vào lớp. Cả hai thấy kết nối thành công; nút mic/loa bật được. B không có nút share giáo viên.
-5. Test thêm trực tiếp: A thêm username một học viên đã đăng ký; học viên được vào không cần gửi mã. Nếu chỉ có hai người, tạo thêm tài khoản thử trong cửa sổ ẩn danh.
-
-## 8. Test media theo thứ tự
-
-1. Hai người dùng tai nghe, không mở cùng lớp nhiều tab có mic/loa cùng bật. Tắt mic ứng dụng họp khác khi đo.
-2. Cả hai Bật loa. A Bật mic, B cho biết có nghe câu đếm 1-10 không. Đảo lại B nói A nghe.
-3. A Tắt mic nhưng giữ loa; A vẫn phải nghe B. B kiểm tra tương tự.
-4. Hai người cùng nói ngắn: kiểm tra vẫn nghe được hai chiều, không mất một phía.
-5. A mở PowerPoint/PDF/tab bài giảng khác, Chia sẻ bài giảng, chọn cửa sổ/tab tài liệu. Không chọn desktop hoặc chính cửa sổ lớp. B thấy slide và thay đổi nội dung. Phía A ẩn preview là chủ ý tránh phản chiếu.
-6. A Dừng chia sẻ: B trở về trạng thái chờ, không giữ frame cuối. Share lại rồi dừng từ thanh browser: kết quả tương tự. Hủy picker: mic/loa/phòng vẫn hoạt động.
-7. Trong khi share, A nói/B trả lời; ghi nhận đứng hình/đứt tiếng/vọng/trễ. B reload rồi login/vào lại khi A còn share: phải thấy frame tiếp theo.
-8. Chat câu hỏi từ mỗi bên, phía kia nhận đúng.
-
-## 9. Test thu hồi quyền và reconnect
-
-1. A Xóa student_test khỏi lớp: B media phải ngắt; reconnect không được bypass membership.
-2. A thêm lại, B quay Danh sách lớp/Làm mới rồi vào.
-3. B Rút khỏi lớp: lớp mất khỏi danh sách; cần được thêm/duyệt lại.
-4. A Lưu trữ lớp: mọi người bị ngắt, lớp không còn trong danh sách active.
-5. Tạo lớp khác để test, B tắt mạng vài giây rồi bật; UI phải báo ngắt, mic/share dừng, dùng Kết nối lại hoặc vào lại lớp.
-6. Dừng/restart Java cùng DB (bỏ --grant-teacher): tài khoản/lớp/membership còn, phiên media phải nối lại.
-
-## 10. Lỗi thường gặp và kết thúc
+## 10. Xử lý lỗi và ghi kết quả
 
 | Hiện tượng | Kiểm tra |
 |---|---|
-| Port 8081 occupied | Dừng đúng server thử cũ; không chạy server thứ hai cùng port |
-| Tunnel 502 | Java có chạy không, localhost:8081/api/health có ok không |
-| UI mở được, media không nối | --app.allowed-origins phải đúng HTTPS origin tunnel hiện tại; F12 Network WS xem handshake 403/101 |
-| Không mic/share | Đúng HTTPS, Chrome/Edge; cho phép mic của site và Windows; chọn đúng device |
-| Không nghe | Bật loa bằng nút, volume/headphone output; browser cho phép audio |
-| Đăng ký tài khoản cũ rồi mà không thấy | Cùng URL/server/database, không dùng DB localhost máy B |
-| Trễ qua tunnel | Ghi nhận triệu chứng, mạng/upload; không kết luận đạt độ trễ chỉ vì kết nối được |
+| Không mở link / 502 | Java chạy? localhost health OK? Tunnel còn chạy? Đúng URL mới? |
+| UI mở nhưng media ngắt | Origin HTTPS trong lệnh Java đúng? Membership đã duyệt? Buổi mở? F12 → Network → WS: 101 là handshake thành công; 403 cần kiểm tra origin/quyền. |
+| Không bật mic | HTTPS, quyền mic site/Windows, đúng thiết bị, có bị chủ lớp khóa? |
+| Voice một chiều | Cả hai mở Thông tin kết nối âm thanh, ghi số liệu hai lần cách 5 giây; xem mic gửi, dữ liệu nhận, trạng thái loa, volume và output tai nghe. Đừng refresh trước khi ghi triệu chứng. |
+| Share lặp | Dừng và chọn cửa sổ/tab tài liệu riêng. |
+| Mất dữ liệu khi restart | Đúng thư mục gốc và ./data/remote-test.db? |
 
-Ghi: bước, máy A/B, browser, giờ, kỳ vọng/thực tế, ảnh lỗi UI và log Java/cloudflared/Network. Không gửi password hoặc session ticket/token trong log. Test đủ bước mới đánh dấu đạt. Chưa đo p50/p95/loss và nghiệm thu hai mạng thật trong môi trường nhóm.
+Mỗi ca ghi: giờ, người thao tác, số người, browser, mạng Wi-Fi/4G, bước, kỳ vọng, thực tế, ảnh UI/thông tin âm thanh, lỗi Java/cloudflared. Không gửi password, cookie, bearer token hoặc session ticket.
 
-Xong test: Ctrl+C terminal cloudflared, Ctrl+C Java. URL ngừng truy cập khi tunnel dừng. Không để prototype public liên tục (chưa có rate limit login/register).
-
-Nguồn: https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/ ; https://developers.cloudflare.com/network/websockets/ ; https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getDisplayMedia .
+Xong: Ctrl+C tunnel rồi Java. Không để máy A ngủ trong buổi test. Test tự động/fake media không chứng minh lỗi voice một chiều đã hết; cần kiểm tra trên thiết bị và mạng thật của nhóm.

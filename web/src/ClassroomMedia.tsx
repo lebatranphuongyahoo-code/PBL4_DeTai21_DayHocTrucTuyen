@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, User } from './api';
+import { api, ChatMessage, User } from './api';
+import { mergeChat } from './chat';
 import { Icon } from './Icons';
 
-type Props = { meetingOpen: boolean; onMeetingChange:(open:boolean)=>void; onCheckMeeting:()=>void; roomId: number; roomName: string; ownerName: string; owned: boolean; token: string; user: User; onManage: () => void; onExit: () => void };
+type Props = { meetingBusy?: boolean; onMeetingEnded:()=>void; meetingId: number | null; meetingOpen: boolean; onMeetingChange:(open:boolean)=>void; onCheckMeeting:()=>void; roomId: number; roomName: string; ownerName: string; owned: boolean; token: string; user: User; onManage: () => void; onExit: () => void };
 type Playback = { context: AudioContext; times: Map<string, number>; sequences: Map<string, number> };
 type Participant = { peerId: string; sourceId: string; username: string; owner: boolean; micAllowed: boolean; screenRequested: boolean; micRequested: boolean; micBlocked: boolean };
 type Controls = { peerId: string; presenter: string; microphonesLocked: boolean; participants: Participant[] };
 const SCREEN = 1, AUDIO = 2;
 
-export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, roomId, roomName, ownerName, owned, token, user, onManage, onExit }: Props) {
+export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meetingOpen, onMeetingChange, onCheckMeeting, roomId, roomName, ownerName, owned, token, user, onManage, onExit }: Props) {
   const [sidebarTab, setSidebarTab] = useState<'chat' | 'people'>('chat');
   const stage = useRef<HTMLElement | null>(null);
   const socket = useRef<WebSocket | null>(null), generation = useRef(0);
@@ -21,7 +22,9 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
   const [sharing, setSharing] = useState(false), [micOn, setMicOn] = useState(false);
   const [shareBusy, setShareBusy] = useState(false), [micBusy, setMicBusy] = useState(false);
   const [listening, setListening] = useState(false), [image, setImage] = useState('');
-  const [chat, setChat] = useState<{ username: string; text: string }[]>([]), [draft, setDraft] = useState('');
+  const [chat, setChat] = useState<ChatMessage[]>([]), [draft, setDraft] = useState('');
+  const [chatMore,setChatMore]=useState(false),[chatBusy,setChatBusy]=useState(false),[chatError,setChatError]=useState('');
+  const chatVersion=useRef(0);
   const [controls, setControls] = useState<Controls | null>(null);
   const permissions = useRef<Controls | null>(null), receivedAudio = useRef(0), sentAudio = useRef(0);
   const [diagnostics, setDiagnostics] = useState('');
@@ -89,17 +92,33 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
     const buffer = context.createBuffer(1, 320, 16000), samples = buffer.getChannelData(0);
     for (let i = 0; i < 320; i++) samples[i] = view.getInt16(13 + i * 2, true) / 32768;
     const now = context.currentTime;
-    let start = Math.max(times.get(sender) ?? now + 0.04, now + 0.01);
-    // Drop accumulated latency after tab suspension or a slow network.
-    if (start > now + 0.16) start = now + 0.04;
+    const start = Math.max(times.get(sender) ?? now + 0.04, now + 0.01);
+    // Drop new packets rather than overlap audio already scheduled for playback.
+    if (start > now + 0.16) return;
     const source = context.createBufferSource(); source.buffer = buffer; source.connect(context.destination);
     source.onended = () => source.disconnect(); source.start(start); times.set(sender, start + 0.02);
   }
+  useEffect(()=>{
+    let active=true;++chatVersion.current;setChat([]);setChatMore(false);setChatError('');setChatBusy(false);
+    if(meetingOpen||!meetingId)return;
+    api('/rooms/'+roomId+'/messages?meeting='+meetingId,'GET',undefined,token).then(reply=>{
+      if(active){setChat(items=>mergeChat(items,reply.messages??[]));setChatMore((reply.messages?.length??0)===50);}
+    }).catch(error=>{if(active)setChatError(error instanceof Error?error.message:'Không tải được lịch sử chat.');});
+    return()=>{active=false;++chatVersion.current;};
+  },[roomId,token,meetingOpen,meetingId]);
+  async function olderMessages(){
+    if(chatBusy||!chat.length)return;setChatBusy(true);setChatError('');
+    const version=chatVersion.current;
+    try {const reply=await api('/rooms/'+roomId+'/messages?meeting='+meetingId+'&before='+chat[0].id,'GET',undefined,token);
+      if(version===chatVersion.current){setChat(items=>mergeChat(items,reply.messages??[]));setChatMore((reply.messages?.length??0)===50);}
+    }catch(error){if(version===chatVersion.current)setChatError(error instanceof Error?error.message:'Không tải được tin cũ.');}
+    finally{if(version===chatVersion.current)setChatBusy(false);}
+  }
   useEffect(() => {
-    if(!meetingOpen){setMeetingEnded(true);setConnected(false);setStatus("Buổi học đã kết thúc. Chờ chủ lớp bắt đầu buổi mới.");return;}
+    if(!meetingOpen){setMeetingEnded(true);setConnected(false);setControls(null);permissions.current=null;setDecision('');setStatus("Buổi học chưa mở hoặc đã kết thúc. Chờ chủ lớp bắt đầu.");return;}
     setMeetingEnded(false);
     const current = ++generation.current;
-    setConnected(false); setChat([]); replaceImage(''); setStatus('Đang kết nối phòng học…');
+    setConnected(false); replaceImage(''); setStatus('Đang kết nối phòng học…');
     setControls(null);setDecision(''); permissions.current = null; receivedAudio.current = 0; sentAudio.current = 0;
     let lastMessage = Date.now();
     const timer = window.setInterval(() => {
@@ -113,7 +132,7 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
         if (generation.current !== current) return;
         const ws = new WebSocket(location.origin.replace(/^http/, 'ws') + '/ws/classroom?ticket=' + encodeURIComponent(reply.ticket!));
         socket.current = ws; ws.binaryType = 'arraybuffer';
-        ws.onopen = () => ws.send(JSON.stringify({ type: 'join', roomId }));
+        ws.onopen = () => ws.send(JSON.stringify({ type: 'join', roomId, meetingId }));
         ws.onmessage = event => {
           if (generation.current !== current) return;
           lastMessage = Date.now();
@@ -132,7 +151,9 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
                 playback.current?.times.forEach((_, id) => { if (!active.has(id)) { playback.current?.times.delete(id); playback.current?.sequences.delete(id); } });
               }
               if (message.type === 'joined') { setConnected(true); setStatus('Đã kết nối lớp học.');setMeetingEnded(false); }
-              if (message.type === 'chat') setChat(items => [...items, message].slice(-100));
+              if (message.type === 'chat'&&message.meetingId===meetingId) setChat(items => mergeChat(items,[message]));
+              // A fresh contiguous page keeps older-message pagination valid after a long disconnect.
+              if (message.type === 'chat-history'&&message.meetingId===meetingId) {++chatVersion.current;setChat(message.messages);setChatMore(message.messages.length===50);setChatBusy(false);setChatError('');}
               if (message.type === 'screen-stop') replaceImage('');
               if (message.type === 'presence') setStatus(message.username + (message.state === 'joined' ? ' đã vào lớp.' : ' đã rời lớp.'));
               if (message.type === 'error') setStatus(message.message);
@@ -147,9 +168,9 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
         };
         ws.onclose = event => {
           if (generation.current !== current) return;
-          if(event.code===4000)setMeetingEnded(true);
-          setConnected(false); stopScreen(false); stopMic(); stopListening(); replaceImage('');
-          setStatus(`Media đã ngắt (mã ${event.code}). ${event.code === 1008 ? 'Kiểm tra phiên đăng nhập và quyền thành viên.' : 'Kiểm tra mạng/server rồi kết nối lại.'}`);
+          if(event.code===4000){setMeetingEnded(true);onMeetingEnded();onCheckMeeting();}
+          setConnected(false); setControls(null); permissions.current=null; stopScreen(false); stopMic(); stopListening(); replaceImage('');
+          setStatus(event.code===4000?'Buổi học đã đóng. Chờ chủ lớp mở buổi tiếp theo.':`Media đã ngắt (mã ${event.code}). ${event.code === 1008 ? 'Kiểm tra phiên đăng nhập và quyền thành viên.' : 'Kiểm tra mạng/server rồi kết nối lại.'}`);
         };
         ws.onerror = () => { if (generation.current === current) setStatus('Không thể kết nối máy chủ media.'); };
       } catch (error) { if (generation.current === current) setStatus(error instanceof Error ? error.message : 'Không kết nối được lớp.'); }
@@ -159,7 +180,7 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
       ++generation.current; stopScreen(false); stopMic(); stopListening(); replaceImage('');
       socket.current?.close(); socket.current = null;
     };
-  }, [roomId, token, attempt, meetingOpen]);
+  }, [roomId, token, attempt, meetingOpen, meetingId]);
 
   async function startScreen() {
     if (!canShare || !connected || shareBusy) return;
@@ -249,7 +270,7 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
   }
   return <div className="classroom-media"><h1 className="visually-hidden">{roomName}</h1>
     <div className="meeting-status" role="status"><span>{status}</span>{!connected&&!meetingEnded&&<button className="ghost-button" onClick={()=>setAttempt(x=>x+1)}>Kết nối lại</button>}</div>
-    <div className="classroom-notices">{meetingEnded&&<div className="request-alert"><strong>Buổi học đã kết thúc. Lớp và danh sách thành viên vẫn được giữ.</strong>{owned?<button className="ghost-button" onClick={()=>{onMeetingChange(true);setAttempt(x=>x+1);}}>Bắt đầu buổi mới</button>:<button className="ghost-button" onClick={()=>{onCheckMeeting();setAttempt(x=>x+1);}}>Kiểm tra buổi học</button>}</div>}{connected&&!owned&&!ownerPresent&&<p role="status" className="owner-absent">Chủ lớp đang vắng mặt. Quyền mic hiện tại được giữ; yêu cầu mới cần chờ chủ lớp quay lại.</p>}{decision&&<p role="status">{decision}</p>}{owned&&pending.length>0&&<div className="request-alert" role="status"><strong>{pending.length} người đang chờ duyệt chia sẻ hoặc phát biểu</strong><button className="ghost-button" onClick={()=>setSidebarTab('people')}>Xem yêu cầu ({pending.length})</button></div>}</div>
+    <div className="classroom-notices">{owned&&meetingOpen&&<div className="request-alert"><button className="ghost-button danger" disabled={meetingBusy} onClick={()=>{if(confirm("Kết thúc buổi học sẽ ngắt media của tất cả người tham gia. Lớp và danh sách thành viên vẫn được giữ. Tiếp tục?"))onMeetingChange(false);}}>Kết thúc buổi học</button></div>}{meetingEnded&&<div className="request-alert"><strong>Buổi học chưa bắt đầu hoặc đã kết thúc. Lớp và danh sách thành viên vẫn được giữ.</strong>{owned?<button className="ghost-button" disabled={meetingBusy} onClick={()=>onMeetingChange(true)}>Bắt đầu buổi học</button>:<button className="ghost-button" disabled={meetingBusy} onClick={onCheckMeeting}>Kiểm tra buổi học</button>}</div>}{connected&&!owned&&!ownerPresent&&<p role="status" className="owner-absent">Chủ lớp đang vắng mặt. Buổi học tự kết thúc nếu chủ lớp không kết nối lại trong 10 phút; yêu cầu mới cần chờ chủ lớp.</p>}{decision&&<p role="status">{decision}</p>}{owned&&pending.length>0&&<div className="request-alert" role="status"><strong>{pending.length} người đang chờ duyệt chia sẻ hoặc phát biểu</strong><button className="ghost-button" onClick={()=>setSidebarTab('people')}>Xem yêu cầu ({pending.length})</button></div>}</div>
     <section className="media-panel lecture-panel" ref={stage}>
       <div className="stage-label"><span className={connected ? 'live-dot connected' : 'live-dot'}/>{connected ? 'Đã kết nối' : 'Chưa kết nối'}</div>
       <div className="stage-course"><span className="avatar">{ownerName.slice(0,2).toUpperCase()}</span><div><strong>{roomName}</strong><small>{ownerName} · Chủ lớp</small></div></div>
@@ -266,10 +287,10 @@ export function ClassroomMedia({ meetingOpen, onMeetingChange, onCheckMeeting, r
       {!canSpeak&&<button className="speech-request ghost-button" disabled={!connected||!ownerPresent||me?.micRequested} onClick={()=>{setDecision('Đã gửi yêu cầu phát biểu. Chờ chủ lớp duyệt.');command('mic-request');}}>{me?.micRequested?'Đang chờ cho phép phát biểu':'Xin phát biểu'}</button>}
     </section>
     <section className="media-panel chat-panel">
-      <h2>Trao đổi trong lớp</h2><div className="sidebar-tabs" role="tablist" aria-label="Trao đổi và thành viên"><button role="tab" aria-selected={sidebarTab==='chat'} onClick={()=>setSidebarTab('chat')}>Tin nhắn</button><button role="tab" aria-selected={sidebarTab==='people'} onClick={()=>setSidebarTab('people')}>Trong phòng <span>{controls?.participants.length??0}</span>{owned&&pending.length>0&&<b className="pending-count">{pending.length} chờ duyệt</b>}</button></div>
-      <div className="chat-content" hidden={sidebarTab!=='chat'}><div className="chat-messages" aria-live="polite">{chat.length===0&&<div className="chat-empty"><Icon name="send"/><strong>Cùng trao đổi bài học</strong><span>Gửi câu hỏi hoặc lời nhắn cho lớp.</span></div>}{chat.map((message,i)=><div className={`chat-entry ${message.username===user.username?'mine':''}`} key={i}><span className="avatar">{message.username.slice(0,2).toUpperCase()}</span><div><strong>{message.username===user.username?'Bạn':message.username}</strong><p>{message.text}</p></div></div>)}</div><form onSubmit={sendChat}><input aria-label="Tin nhắn lớp học" value={draft} onChange={e=>setDraft(e.target.value)} maxLength={500} placeholder="Nhập tin nhắn…"/><button className="ghost-button" title="Gửi" aria-label="Gửi" disabled={!connected||!draft.trim()}><Icon name="send"/></button></form></div>
+      <h2>Trao đổi trong buổi học</h2><div className="sidebar-tabs" role="tablist" aria-label="Trao đổi và thành viên"><button role="tab" aria-selected={sidebarTab==='chat'} onClick={()=>setSidebarTab('chat')}>Tin nhắn</button><button role="tab" aria-selected={sidebarTab==='people'} onClick={()=>setSidebarTab('people')}>Trong phòng <span>{controls?.participants.length??0}</span>{owned&&pending.length>0&&<b className="pending-count">{pending.length} chờ duyệt</b>}</button></div>
+      <div className="chat-content" hidden={sidebarTab!=='chat'}><div className="chat-messages" aria-live="polite">{chatMore&&<button className="ghost-button" disabled={chatBusy} onClick={()=>void olderMessages()}>{chatBusy?"Đang tải…":"Tải tin nhắn cũ hơn"}</button>}{chatError&&<p role="alert">{chatError}</p>}{chat.length===0&&<div className="chat-empty"><Icon name="send"/><strong>Cùng trao đổi bài học</strong><span>Gửi câu hỏi hoặc lời nhắn cho lớp.</span></div>}{chat.map(message=><div className={`chat-entry ${message.username===user.username?'mine':''}`} key={message.id}><span className="avatar">{message.username.slice(0,2).toUpperCase()}</span><div><strong>{message.username===user.username?'Bạn':message.username}</strong><p>{message.text}</p><small>{new Date(message.sentAt).toLocaleString("vi-VN")}</small></div></div>)}</div><form onSubmit={sendChat}><input aria-label="Tin nhắn lớp học" value={draft} onChange={e=>setDraft(e.target.value)} maxLength={500} placeholder="Nhập tin nhắn…"/><button className="ghost-button" title="Gửi" aria-label="Gửi" disabled={!connected||!draft.trim()}><Icon name="send"/></button></form></div>
       <aside className="meeting-sidebar" hidden={sidebarTab!=='people'}>
-        {owned&&<section className="moderation-panel"><h3>Điều hành buổi học</h3><button className="ghost-button danger" disabled={!connected} onClick={()=>{if(confirm("Kết thúc buổi học sẽ ngắt media của tất cả người tham gia. Lớp và danh sách thành viên vẫn được giữ. Tiếp tục?"))onMeetingChange(false);}}>Kết thúc buổi học</button><button className="ghost-button" disabled={!connected} onClick={()=>command('mic-lock',{locked:!controls?.microphonesLocked})}>{controls?.microphonesLocked?'Mở quyền mic cả lớp':'Khóa mic học viên cả lớp'}</button>{!!controls?.presenter&&<button className="ghost-button" onClick={()=>command('screen-revoke')}>Dừng người đang chia sẻ</button>}{controls?.participants.filter(p=>!p.owner).map(p=><div className="permission-row" key={p.peerId}><strong>{p.username}</strong><small>{p.micAllowed?'Được bật mic':'Mic bị khóa'}</small><button className="ghost-button" disabled={!connected} onClick={()=>command('mic-block',{peerId:p.peerId,blocked:!p.micBlocked})}>{p.micBlocked?'Mở mic riêng':'Khóa mic riêng'}</button>{!p.screenRequested&&controls.presenter!==p.peerId&&<button className="ghost-button" disabled={!connected} onClick={()=>command('screen-grant',{peerId:p.peerId})}>Mời trình bày</button>}{p.screenRequested&&<><button className="ghost-button" onClick={()=>command('screen-review',{peerId:p.peerId,approve:true})}>Duyệt chia sẻ</button><button className="ghost-button" onClick={()=>command('screen-review',{peerId:p.peerId,approve:false})}>Từ chối chia sẻ</button></>}{controls.microphonesLocked&&<button className="ghost-button" onClick={()=>command('mic-review',{peerId:p.peerId,approve:!p.micAllowed})}>{p.micAllowed?'Thu hồi quyền mic':p.micRequested?'Duyệt phát biểu':'Cho phép bật mic'}</button>}</div>)}</section>}
+        {owned&&<section className="moderation-panel"><h3>Điều hành buổi học</h3><button className="ghost-button" disabled={!connected} onClick={()=>command('mic-lock',{locked:!controls?.microphonesLocked})}>{controls?.microphonesLocked?'Mở quyền mic cả lớp':'Khóa mic học viên cả lớp'}</button>{!!controls?.presenter&&<button className="ghost-button" onClick={()=>command('screen-revoke')}>Dừng người đang chia sẻ</button>}{controls?.participants.filter(p=>!p.owner).map(p=><div className="permission-row" key={p.peerId}><strong>{p.username}</strong><small>{p.micAllowed?'Được bật mic':'Mic bị khóa'}</small><button className="ghost-button" disabled={!connected} onClick={()=>command('mic-block',{peerId:p.peerId,blocked:!p.micBlocked})}>{p.micBlocked?'Mở mic riêng':'Khóa mic riêng'}</button>{!p.screenRequested&&controls.presenter!==p.peerId&&<button className="ghost-button" disabled={!connected} onClick={()=>command('screen-grant',{peerId:p.peerId})}>Mời trình bày</button>}{p.screenRequested&&<><button className="ghost-button" onClick={()=>command('screen-review',{peerId:p.peerId,approve:true})}>Duyệt chia sẻ</button><button className="ghost-button" onClick={()=>command('screen-review',{peerId:p.peerId,approve:false})}>Từ chối chia sẻ</button></>}{controls.microphonesLocked&&<button className="ghost-button" onClick={()=>command('mic-review',{peerId:p.peerId,approve:!p.micAllowed})}>{p.micAllowed?'Thu hồi quyền mic':p.micRequested?'Duyệt phát biểu':'Cho phép bật mic'}</button>}</div>)}</section>}
         <section className="room-members"><h3>Đang kết nối ({controls?.participants.length??0})</h3><p>Một tài khoản có thể có nhiều kết nối.</p>{controls?.participants.map(p=><div className="permission-row" key={p.peerId}><strong>{p.username}{p.peerId===controls.peerId?" (bạn)":""}</strong><small>{p.owner?"Chủ lớp":"Học viên"} · {controls.presenter===p.peerId?"Đang trình bày":p.micAllowed?"Được bật mic":"Mic bị khóa"}</small></div>)}</section><button type="button" className="ghost-button open-management" onClick={onManage}>Danh sách & quản lý lớp</button>
       </aside>
     </section>

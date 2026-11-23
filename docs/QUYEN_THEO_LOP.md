@@ -2,13 +2,13 @@
 
 ## Quyết định đã được người dùng duyệt
 
-Account thông thường; mọi account ACTIVE được tạo và tham gia lớp. classrooms.owner_id quyết định chủ lớp, classroom_members quyết định thành viên. Người tạo lớp A có thể học ở lớp B. Chia sẻ là quyền tạm thời theo connection trong phòng; chủ lớp cấp/thu hồi, một nguồn trình bày tại một thời điểm. Presenter không được quản lý người khác. Quyền mic độc lập.
+Account đăng ký công khai vẫn là STUDENT; role ADMIN/TEACHER chỉ được cấp bằng operator cục bộ. Mọi account ACTIVE vẫn có thể tạo hoặc tham gia lớp theo chính sách owner/member. `classrooms.owner_id` quyết định chủ lớp, `classroom_members` quyết định thành viên. Người tạo lớp A có thể học ở lớp B. Chia sẻ là quyền tạm thời theo connection trong phòng; chủ lớp cấp/thu hồi, một nguồn trình bày tại một thời điểm. Presenter không được quản lý người khác. Quyền mic độc lập.
 
-Không sao chép toàn bộ quyền Teams: Presenter Teams có thêm quyền điều hành; dự án dùng người trình bày với quyền chia sẻ tối thiểu. Admin hệ thống là chức năng vận hành riêng, không tự có quyền điều hành mọi phòng.
+Không sao chép toàn bộ quyền Teams: Presenter Teams có thêm quyền điều hành; dự án dùng người trình bày với quyền chia sẻ tối thiểu. Admin hệ thống quản lý danh sách lớp, lưu trữ, đổi chủ lớp và chuyển học viên qua `/api/admin/*`, nhưng không tự có quyền điều hành media nếu chưa là thành viên phòng.
 
 ## Tương thích SQLite/API
 
-Không thay schema hoặc viết lại account/lớp/member/session. Cột accounts.role cũ giữ để rollback nhưng không dùng cấp quyền. Public user role trả USER; member trong detail trả OWNER/MEMBER theo quan hệ lớp. room list thêm owned. --grant-teacher được giữ như option ngừng sử dụng, chỉ thông báo và không cập nhật DB. Không dùng CLI cũ để cấu hình nghiệp vụ mới.
+Không thay schema account/lớp/member/session. `accounts.role` được dùng cho guard Admin và operator cấp quyền; public registration không nhận role đặc quyền. Public user vẫn trả USER cho tài khoản thường; member trong detail trả OWNER/MEMBER theo quan hệ lớp. Admin dùng các route riêng `/api/admin/rooms`, `/archive`, `/owner` và `/members/{account}/transfer`.
 
 Rollback JAR cũ có thể chạy cùng DB vì schema giữ nguyên, nhưng account role cũ STUDENT đã tạo lớp trong chính sách mới sẽ bị hạn chế trên bản cũ. Rollback dữ liệu/chính sách cần đối chiếu lớp mới; không hứa rollback hành vi tương đương. Backup JAR backend/target/classroom-web-server-before-per-room-roles.jar.
 
@@ -20,4 +20,4 @@ Browser hai context: cả account demo cũ đều thấy Tạo lớp và Tham gi
 
 ## Còn lại
 
-Chưa có meeting entity/persistence kết thúc buổi, co-organizer hoặc admin UI. Có thể bổ sung sau; không cần viết lại ba service chỉ để có đủ tên Account/Class/Meeting Manager. MediaControls hiện theo connection, mất grant khi rời; cần công khai hành vi này khi thiết kế quyền theo buổi.
+Chưa có co-organizer hoặc audit lịch sử chuyển lớp. Admin UI hiện quản lý lớp và thành viên; Admin vẫn không được bypass `mediaAccess`. MediaControls hiện theo connection, mất grant khi rời; cần công khai hành vi này khi thiết kế quyền theo buổi.

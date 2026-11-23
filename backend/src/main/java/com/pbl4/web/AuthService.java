@@ -27,7 +27,13 @@ public class AuthService {
     private final String dummyHash = encoder.encode("dummy-password-for-timing");
     private final SecureRandom random = new SecureRandom();
     public AuthService(Database db) { this.db = db; }
-    public static User publicUser(Database.Account a) { return new User(a.username(),a.displayName(),"USER"); }
+    public static User publicUser(Database.Account a) {
+        String role = switch (a.role()) {
+            case "ADMIN", "TEACHER" -> a.role();
+            default -> "USER";
+        };
+        return new User(a.username(),a.displayName(),role);
+    }
     private String text(String value) { return value == null ? "" : value.strip(); }
     public User register(Registration input) throws SQLException {
         String username=text(input.username()), displayName=text(input.displayName()), password=input.password()==null?"":input.password();

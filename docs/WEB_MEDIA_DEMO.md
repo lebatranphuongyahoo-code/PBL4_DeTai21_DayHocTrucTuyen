@@ -2,7 +2,7 @@
 
 ## Luồng nghiệp vụ đã chọn
 
-Đề 21 không bắt buộc ADMIN/duyệt hồ sơ giáo viên hoặc Swing. Người dùng đã ủy quyền chọn luồng phù hợp. Public register chỉ STUDENT; người vận hành cấp TEACHER bằng CLI, không thêm hồ sơ xét duyệt ở mốc này. TEACHER tạo/sở hữu lớp, thêm học viên theo username hoặc duyệt yêu cầu mã lớp. Biết mã chưa được vào lớp. Membership bền vững tách khỏi kết nối online: rời trang ngắt media; Rút khỏi lớp xóa membership; Lưu trữ thu hồi truy cập cả lớp.
+Đề 21 cần cấp quản lý cao hơn cho các lớp đang mở. Public register chỉ STUDENT; người vận hành cấp ADMIN/TEACHER bằng CLI cục bộ. TEACHER/chủ lớp tạo và điều hành lớp; ADMIN xem toàn bộ lớp, lưu trữ, đổi chủ lớp và chuyển học viên. Admin không tự có quyền media nếu chưa là thành viên. Membership bền vững tách khỏi kết nối online: rời trang ngắt media; Rút khỏi lớp xóa membership; Lưu trữ thu hồi truy cập cả lớp.
 
 ## Build và chạy
 
@@ -24,9 +24,11 @@ Mở http://127.0.0.1:8081. JAR chứa React, REST và WebSocket. Dừng JAR tr�
 
 ```powershell
 java -jar backend/target/classroom-web-server-0.1.0.jar --grant-teacher=username_giao_vien
+# hoặc cấp người quản trị toàn hệ thống
+java -jar backend/target/classroom-web-server-0.1.0.jar --grant-admin=username_quan_tri
 ```
 
-Lần sau bỏ --grant-teacher; login lại để cập nhật quyền UI. CLI dành người được vận hành server. Không tự tạo tài khoản/mật khẩu đặc quyền.
+Lần sau bỏ các option cấp quyền; login lại để cập nhật quyền UI. CLI dành người được vận hành server. Không tự tạo tài khoản/mật khẩu đặc quyền.
 
 DB mặc định ./data/classroom-web.db tính từ thư mục chạy, đổi bằng --app.database=...; web DB tách DB Swing. Sao lưu khi server dừng. Không nhập tự động SHA-256 hoặc quyền giáo viên cũ. Migration legacy cần rà soát quyền và reset mật khẩu có xác minh; chưa có công cụ nhập legacy.
 
@@ -56,6 +58,27 @@ PCM mono 16kHz, khung 20ms; AudioWorklet resample theo sampleRate thật. Mic/lo
 
 WebSocket chạy TCP: truyền tin cậy nhưng mất gói mạng có thể gây chờ/tăng trễ. Đây là relay Java cho prototype lớp nhỏ để thể hiện server/đa luồng/đồng bộ theo đề; chưa phải SFU/WebRTC hoặc bằng chứng quy mô/độ trễ. Audio/screen cùng socket vẫn tranh băng thông; phải đo trước khi quyết định tách socket/nâng gateway.
 
+## Thuật toán mạng cốt lõi
+
+Đây không phải Minimax/Max-min. Luồng chính là **server relay/fan-out theo phòng**, có kiểm tra quyền trước khi chuyển tiếp và bounded producer-consumer queue để áp dụng backpressure:
+
+```text
+onMediaPacket(sender, packet):
+    verifySessionAndRoomMembership(sender)
+    if packet is audio and not microphoneAllowed(sender): drop
+    if packet is screen and sender is not currentPresenter: drop
+    for each peer in the same room, except sender:
+        enqueue packet to that peer's single-writer queue
+        if queued bytes exceed 2 MiB or queue is full:
+            disconnect the slow peer
+```
+
+Với `n` người trong phòng, một gói được kiểm tra/relay tới tối đa `n-1` người nhận, nên chi phí fan-out là O(n) mỗi gói. Mỗi peer có một executor gửi tuần tự, hàng đợi tối đa 32 message và giới hạn 2 MiB đang chờ; cơ chế này giữ thứ tự ghi và ngăn bộ nhớ tăng không giới hạn khi người nhận chậm. Nguồn gửi không nhận lại bản relay của chính mình.
+
+Đồng bộ hiện dùng `ConcurrentHashMap` cho peer/trạng thái phòng, khóa trên peer và `MediaControls` cho các cập nhật quyền, cùng transaction SQLite đồng bộ. Lưu ý: callback nhận WebSocket vẫn `synchronized` ở cấp handler và kiểm tra session/membership truy cập SQLite; các lớp khác nhau vì vậy chưa được chứng minh xử lý media song song hiệu quả. Đây là giới hạn cần đo, không được quảng bá tải lớn từ test chức năng.
+
+Khi thuyết trình, lần lượt nêu: (1) xác thực ticket và membership, (2) kiểm tra quyền mic/presenter, (3) fan-out tới thành viên cùng phòng, (4) hàng đợi giới hạn/ngắt peer chậm. Đó là nguyên lý mạng và đồng bộ thực sự của bản hiện tại.
+
 Browser picker được gợi ý chọn window/tab, ẩn current tab/full desktop khi hỗ trợ. Client từ chối nguồn monitor nếu browser báo loại đó, giáo viên không hiển thị preview tự phản chiếu. Web API không đảm bảo loại trừ mọi cửa sổ trên mọi browser: vẫn phải chọn đúng tài liệu. Nút dừng và track ended gửi screen-stop xóa ảnh học viên; rời trang/ngắt mạng dừng tracks/contexts.
 
 ## Bằng chứng
@@ -77,4 +100,4 @@ Browser picker được gợi ý chọn window/tab, ẩn current tab/full deskto
 | Disconnect/reconnect | Không queue vô hạn; UI báo ngắt; không bypass quyền | Unit/socket/UI một phần, mạng thật chưa xác minh |
 | Restart | DB còn lớp/thành viên; phiên media phải nối lại; vé cũ không tái dùng | DB test đạt; demo nhiều máy chưa xác minh |
 
-Chưa tuyên bố hoàn thiện đề 21. Rate limit login/register, phục hồi mật khẩu, admin GUI, nhập legacy và vận hành Internet chưa triển khai. Chúng không đều là yêu cầu đề, nhưng cần cân nhắc trước khi mở public.
+Chưa tuyên bố hoàn thiện đề 21. Rate limit login/register, nhập legacy, chạy hai máy thật và đo tải/độ trễ chưa nghiệm thu. Admin dashboard đã có trong nhánh trùng tu. Lịch sử kết nối chỉ giữ để chẩn đoán vòng đời buổi học; ứng dụng không có báo cáo điểm danh.

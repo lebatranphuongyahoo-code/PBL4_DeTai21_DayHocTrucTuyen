@@ -16,6 +16,7 @@ class ClassroomTest {
             db.transaction(c->{try(var s=c.createStatement()){s.executeUpdate("UPDATE accounts SET role='TEACHER' WHERE username IN ('teacher','other')");}return null;});
             var teacher=db.findAccount("teacher");var other=db.findAccount("other");var student=db.findAccount("student");
             var studentOwned=rooms.create(student,"Lớp của tài khoản cũ STUDENT");
+            rooms.setMeeting(student,studentOwned.id(),true);
             assertTrue(rooms.mediaAccess(student,studentOwned.id()));
             rooms.archive(student,studentOwned.id());
             var room=rooms.create(teacher,"Toán ứng dụng");

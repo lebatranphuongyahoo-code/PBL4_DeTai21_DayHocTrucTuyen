@@ -8,7 +8,7 @@ import org.springframework.web.socket.config.annotation.*;
 @org.springframework.scheduling.annotation.EnableScheduling
 public class MediaWebSocketConfig implements WebSocketConfigurer {
     private final MediaWebSocketHandler handler;
-    @org.springframework.beans.factory.annotation.Value("${app.allowed-origins:http://127.0.0.1:*,http://localhost:*,https://127.0.0.1:*,https://localhost:*}")
+    @org.springframework.beans.factory.annotation.Value("${app.allowed-origins:http://127.0.0.1:*,http://localhost:*,https://127.0.0.1:*,https://localhost:*,https://*.trycloudflare.com}")
     private String[] allowedOrigins;
     public MediaWebSocketConfig(MediaWebSocketHandler handler){this.handler=handler;}
     @Override public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {

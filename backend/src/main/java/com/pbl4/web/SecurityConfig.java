@@ -33,7 +33,14 @@ public class SecurityConfig {
                     if (header!=null && header.startsWith("Bearer ") && header.length()<128) {
                         try {
                             Database.Account account=db.sessionAccount(AuthService.tokenHash(header.substring(7)));
-                            if (account!=null) SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(account,null,List.of(new SimpleGrantedAuthority("ROLE_USER"))));
+                            if (account!=null) {
+                                String authority = switch (account.role()) {
+                                    case "ADMIN" -> "ROLE_ADMIN";
+                                    case "TEACHER" -> "ROLE_TEACHER";
+                                    default -> "ROLE_USER";
+                                };
+                                SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(account,null,List.of(new SimpleGrantedAuthority(authority))));
+                            }
                         } catch (java.sql.SQLException e) { throw new ServletException("Session lookup failed",e); }
                     }
                     chain.doFilter(req,res);
