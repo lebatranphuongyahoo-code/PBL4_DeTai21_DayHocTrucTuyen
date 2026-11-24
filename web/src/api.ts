@@ -6,6 +6,7 @@ export type JoinRequest = { accountId: number; username: string; displayName: st
 export type JoinStatus = { roomId: number; roomName: string; status: string };
 export type MeetingHistory = { id: number; startedAt: number; endedAt: number | null; startUncertain: boolean; endReason: string | null; connections: { id: number; username: string; displayName: string; joinedAt: number; leftAt: number | null; interrupted: boolean }[] };
 export type ChatMessage = { id: number; username: string; text: string; sentAt: number; meetingId: number | null };
+export type MeetingHistoryReply = { ok: boolean; meetings?: MeetingHistory[]; hasLegacyChat?: boolean };
 export type ActivitySubmission = { accountId: number; username: string; displayName: string; answer: string | null; submittedAt: number | null; score: number | null; feedback: string | null; reviewedAt: number | null };
 export type Activity = { id: number; title: string; prompt: string; createdAt: number; submissionCount: number; submission: ActivitySubmission | null };
 export type Reply = { ok: boolean; message?: string; errors?: Record<string,string>; user?: User; token?: string; rooms?: Room[]; room?: Detail; requests?: JoinRequest[]; joinStatuses?: JoinStatus[]; meetings?: MeetingHistory[]; messages?: ChatMessage[]; activities?: Activity[]; activity?: Activity; submissions?: ActivitySubmission[]; submission?: ActivitySubmission; ticket?: string };

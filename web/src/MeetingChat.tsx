@@ -13,7 +13,7 @@ export function MeetingChat({roomId,meetingId,token}: {roomId:number;meetingId:n
     }).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setBusy(false);});
     return()=>{active=false;};
   },[roomId,meetingId,token,page,refresh]);
-  return <section><h4>{meetingId===0?'Tin nhắn cũ chưa xác định buổi':'Chat của buổi học'}</h4>
+  return <section>{meetingId!==0&&<h4>Chat của buổi học</h4>}
     <p>{meetingId===0?'Tin từ phiên bản cũ được giữ riêng vì chưa có mã buổi.':'Lịch sử chỉ đọc. Muốn gửi tin, hãy quay lại buổi đang mở.'}</p>
     <button className="ghost-button" disabled={busy} onClick={()=>{setPage(0);setRefresh(x=>x+1);}}>Làm mới chat</button>
     {more&&messages.length>0&&<button className="ghost-button" disabled={busy} onClick={()=>setPage(messages[0].id)}>Tải chat cũ hơn</button>}

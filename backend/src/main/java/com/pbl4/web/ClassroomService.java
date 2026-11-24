@@ -209,6 +209,15 @@ public class ClassroomService {
     public List<ChatMessage> messages(Database.Account user,long id,long before)throws SQLException {
         return messages(user,id,-1,before);
     }
+    public boolean hasLegacyChat(Database.Account user,long id)throws SQLException {
+        return db.transaction(c->{
+            access(c,user,room(c,id));
+            try(var statement=c.prepareStatement("SELECT 1 FROM class_messages WHERE classroom_id=? AND session_id IS NULL LIMIT 1")){
+                statement.setLong(1,id);
+                try(var rows=statement.executeQuery()){return rows.next();}
+            }
+        });
+    }
     public List<ChatMessage> messages(Database.Account user,long id,long session,long before)throws SQLException {
         return db.transaction(c->{access(c,user,room(c,id));var result=new ArrayList<ChatMessage>();
             Long selected=session==-1?latestMeeting(c,id):session==0?null:session;

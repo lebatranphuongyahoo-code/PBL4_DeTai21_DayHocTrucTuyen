@@ -18,6 +18,7 @@ class MeetingChatTest {
             rooms.setMeeting(owner,id,true);long second=rooms.history(owner,id).get(0).id();
             assertTrue(rooms.messages(member,id,Long.MAX_VALUE).isEmpty(),"New meeting must not replay previous chat");
             rooms.postMessage(member,id,second,"Second only");
+            assertFalse(rooms.hasLegacyChat(member,id));
             assertEquals("Second only",rooms.messages(member,id,second,Long.MAX_VALUE).get(0).text());
             var old=rooms.messages(member,id,first,Long.MAX_VALUE);assertEquals(50,old.size());assertEquals("First 5",old.get(0).text());assertEquals(5,rooms.messages(member,id,first,old.get(0).id()).size());
             assertThrows(AuthService.Failure.class,()->rooms.postMessage(member,id,first,"stale send"));
@@ -42,7 +43,7 @@ class MeetingChatTest {
         }finally{db.close();}
         for(int i=0;i<2;i++){
             var reopened=new Database(path);
-            try{var rooms=new ClassroomService(reopened);var owner=reopened.findAccount("owner");var legacy=rooms.messages(owner,id,0,Long.MAX_VALUE);assertEquals(1,legacy.size());assertEquals("Old preserved",legacy.get(0).text());
+            try{var rooms=new ClassroomService(reopened);var owner=reopened.findAccount("owner");assertTrue(rooms.hasLegacyChat(owner,id));var legacy=rooms.messages(owner,id,0,Long.MAX_VALUE);assertEquals(1,legacy.size());assertEquals("Old preserved",legacy.get(0).text());
                 rooms.setMeeting(owner,id,true);assertTrue(rooms.messages(owner,id,Long.MAX_VALUE).isEmpty());rooms.setMeeting(owner,id,false);
             }finally{reopened.close();}
         }

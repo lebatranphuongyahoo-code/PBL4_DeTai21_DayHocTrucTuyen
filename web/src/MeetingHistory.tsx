@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, MeetingHistory as Meeting } from './api';
+import { api, MeetingHistory as Meeting, MeetingHistoryReply } from './api';
 import { MeetingChat } from './MeetingChat';
 import { Icon } from './Icons';
 
@@ -35,12 +35,13 @@ export function MeetingCard({meeting,roomId,token,owned,onJoin,joinDisabled}: {m
 export function MeetingHistoryPanel({roomId,token,refreshKey,owned,meetingOpen,currentMeetingId,onJoin,joinBusy}: {roomId:number;token:string;refreshKey:string;owned:boolean;meetingOpen:boolean;currentMeetingId:number|null;onJoin:()=>void;joinBusy:boolean}) {
   const [meetings,setMeetings]=useState<Meeting[]>([]),[busy,setBusy]=useState(false),[more,setMore]=useState(false),[error,setError]=useState('');
   const [legacyOpen,setLegacyOpen]=useState(false);
+  const [hasLegacyChat,setHasLegacyChat]=useState(false);
   const [refresh,setRefresh]=useState(0);
   const version=useRef(0);
   useEffect(()=>{
     let active=true;++version.current;setBusy(true);setError('');
-    api('/rooms/'+roomId+'/meetings','GET',undefined,token).then(reply=>{
-      if(active){setMeetings(reply.meetings??[]);setMore((reply.meetings?.length??0)===50);}
+    api<MeetingHistoryReply>('/rooms/'+roomId+'/meetings','GET',undefined,token).then(reply=>{
+      if(active){setMeetings(reply.meetings??[]);setMore((reply.meetings?.length??0)===50);setHasLegacyChat(reply.hasLegacyChat===true);}
     }).catch(e=>{if(active)setError(e.message);}).finally(()=>{if(active)setBusy(false);});
     return()=>{active=false;++version.current;};
   },[roomId,token,refreshKey,refresh]);
@@ -57,6 +58,6 @@ export function MeetingHistoryPanel({roomId,token,refreshKey,owned,meetingOpen,c
     {!busy&&!meetings.length&&!error&&<div className="meeting-feed-empty"><Icon name="book"/><h3>Chưa có buổi học</h3><p>{owned?'Bắt đầu buổi học đầu tiên để cùng học và trao đổi với lớp.':'Các buổi học sẽ xuất hiện tại đây khi chủ lớp bắt đầu.'}</p></div>}
     <div className="meeting-timeline">{meetings.map(meeting=><MeetingCard key={meeting.id+':'+refresh+':'+refreshKey} meeting={meeting} roomId={roomId} token={token} owned={owned} onJoin={meetingOpen&&meeting.id===currentMeetingId?onJoin:undefined} joinDisabled={joinBusy}/>)}</div>
     {more&&<button className="ghost-button" disabled={busy} onClick={()=>void older()}>Tải buổi học cũ hơn</button>}
-    <details className="legacy-chat" onToggle={event=>setLegacyOpen(event.currentTarget.open)}><summary>Tin nhắn cũ chưa xác định buổi</summary>{legacyOpen&&<MeetingChat roomId={roomId} meetingId={0} token={token}/>}</details>
+    {hasLegacyChat&&<details className="legacy-chat" onToggle={event=>setLegacyOpen(event.currentTarget.open)}><summary>Tin nhắn cũ chưa xác định buổi</summary>{legacyOpen&&<MeetingChat roomId={roomId} meetingId={0} token={token}/>}</details>}
   </section>;
 }

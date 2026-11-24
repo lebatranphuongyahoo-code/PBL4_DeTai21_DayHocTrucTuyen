@@ -20,7 +20,13 @@ public class ClassroomController {
     private Database.Account user(Authentication a){return (Database.Account)a.getPrincipal();}
     @PostMapping public Map<String,Object> create(Authentication a,@RequestBody Create input)throws SQLException{return Map.of("ok",true,"room",rooms.create(user(a),input.name()));}
     @GetMapping("/{id}") public Map<String,Object> detail(Authentication a,@PathVariable long id)throws SQLException{return Map.of("ok",true,"room",rooms.detail(user(a),id));}
-    @GetMapping("/{id}/meetings") public Map<String,Object> history(Authentication a,@PathVariable long id,@RequestParam(defaultValue="9223372036854775807") long before)throws SQLException{return Map.of("ok",true,"meetings",rooms.history(user(a),id,before));}
+    @GetMapping("/{id}/meetings") public Map<String,Object> history(Authentication a,@PathVariable long id,@RequestParam(defaultValue="9223372036854775807") long before)throws SQLException{
+        var account=user(a);
+        var meetings=rooms.history(account,id,before);
+        return before==Long.MAX_VALUE
+            ? Map.of("ok",true,"meetings",meetings,"hasLegacyChat",rooms.hasLegacyChat(account,id))
+            : Map.of("ok",true,"meetings",meetings);
+    }
     @GetMapping("/{id}/messages") public Map<String,Object> messages(Authentication a,@PathVariable long id,@RequestParam(defaultValue="-1") long meeting,@RequestParam(defaultValue="9223372036854775807") long before)throws SQLException{return Map.of("ok",true,"messages",rooms.messages(user(a),id,meeting,before));}
     @GetMapping("/{id}/activities") public Map<String,Object> activities(Authentication a,@PathVariable long id)throws SQLException{return Map.of("ok",true,"activities",rooms.activities(user(a),id));}
     @PostMapping("/{id}/activities") public Map<String,Object> createActivity(Authentication a,@PathVariable long id,@RequestBody Activity input)throws SQLException{return Map.of("ok",true,"activity",rooms.createActivity(user(a),id,input.title(),input.prompt()));}
