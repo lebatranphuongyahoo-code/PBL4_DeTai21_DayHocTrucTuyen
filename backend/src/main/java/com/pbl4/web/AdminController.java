@@ -24,4 +24,5 @@ public class AdminController {
     @PostMapping("/rooms/{source}/members/{account}/transfer") public Map<String,Object> transfer(Authentication a,@PathVariable long source,@PathVariable long account,@RequestBody Move input)throws SQLException{ synchronized(media){String username=rooms.transferMember(user(a),source,account,input.targetRoomId());media.disconnectMember(source,username);}return Map.of("ok",true); }
     @GetMapping("/users") public Map<String,Object> users(Authentication a)throws SQLException{return Map.of("ok",true,"users",rooms.adminUsers(user(a)));}
     @PostMapping("/users/{account}/teacher") public Map<String,Object> promoteTeacher(Authentication a,@PathVariable long account)throws SQLException{rooms.promoteStudentToTeacher(user(a),account);return Map.of("ok",true);}
+    @DeleteMapping("/users/{account}/teacher") public Map<String,Object> demoteTeacher(Authentication a,@PathVariable long account)throws SQLException{rooms.demoteTeacherToStudent(user(a),account);return Map.of("ok",true);}
 }

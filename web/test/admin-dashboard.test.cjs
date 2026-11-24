@@ -16,7 +16,7 @@ function harness(options={}){
     useEffect(effect){effects.push(effect);},
   };
   const filename=path.join(__dirname,'../src/AdminDashboard.tsx'),compiled=new Module(filename,module);compiled.paths=module.paths;
-  compiled.require=name=>name==='react'?hooks:name==='./api'?{api:async(url,method='GET',body)=>{calls.push({url,method,body});if(url==='/admin/rooms'&&method==='GET'){if(options.roomsError)throw new Error('Không kết nối được.');return{rooms};}if(url==='/admin/users'&&method==='GET'){if(options.usersError)throw new Error('Không tải được người dùng.');return{users};}if(url==='/admin/users/11/teacher'&&method==='POST'){users.find(account=>account.id===11).role='TEACHER';return{ok:true};}return url==='/admin/rooms/1'?{room:structuredClone(detail)}:{ok:true};}}:name.startsWith('./')?new Proxy({},{get:()=>()=>null}):require(name);
+  compiled.require=name=>name==='react'?hooks:name==='./api'?{api:async(url,method='GET',body)=>{calls.push({url,method,body});if(url==='/admin/rooms'&&method==='GET'){if(options.roomsError)throw new Error('Không kết nối được.');return{rooms};}if(url==='/admin/users'&&method==='GET'){if(options.usersError)throw new Error('Không tải được người dùng.');return{users};}if(url==='/admin/users/11/teacher'&&method==='POST'){users.find(account=>account.id===11).role='TEACHER';return{ok:true};}if(url==='/admin/users/11/teacher'&&method==='DELETE'){users.find(account=>account.id===11).role='STUDENT';return{ok:true};}return url==='/admin/rooms/1'?{room:structuredClone(detail)}:{ok:true};}}:name.startsWith('./')?new Proxy({},{get:()=>()=>null}):require(name);
   compiled._compile(ts.transpileModule(fs.readFileSync(filename,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,filename);
   function render(){cursor=0;tree=compiled.exports.AdminDashboard({user:{username:'admin',displayName:'Admin',role:'ADMIN'},token:'admin-token',onLogout(){},logoutBusy:false,logoutError:''});return tree;}
   function nodes(node){if(Array.isArray(node))return node.flatMap(nodes);if(!node||typeof node!=='object')return[];return[node,...nodes(node.props?.children)];}
@@ -64,12 +64,20 @@ test('admin can create a class and assign an active teacher owner',async()=>{
 });
 
 test('admin can list accounts and promote a student to teacher',async()=>{
-  const h=harness();h.effects[0]();await h.settle();
-  assert.match(h.text(h.tree()),/Student/);
-  const promote=h.nodes(h.tree()).find(node=>node.type==='button'&&h.text(node.props.children)==='Cấp quyền giảng viên');
-  assert.ok(promote);promote.props.onClick();await h.settle();
-  assert.ok(h.calls.some(call=>call.url==='/admin/users/11/teacher'&&call.method==='POST'));
-  assert.match(h.text(h.tree()),/Giảng viên/);
+  const previous=global.confirm;global.confirm=()=>true;
+  try{
+    const h=harness();h.effects[0]();await h.settle();
+    assert.match(h.text(h.tree()),/Student/);
+    const promote=h.nodes(h.tree()).find(node=>node.type==='button'&&h.text(node.props.children)==='Cấp quyền giảng viên');
+    assert.ok(promote);promote.props.onClick();await h.settle();
+    assert.ok(h.calls.some(call=>call.url==='/admin/users/11/teacher'&&call.method==='POST'));
+    const studentRow=()=>h.nodes(h.tree()).find(node=>node.type==='article'&&h.text(node).includes('Student'));
+    assert.match(h.text(studentRow()),/Giảng viên/);
+    const revoke=h.nodes(h.tree()).filter(node=>node.type==='button'&&h.text(node.props.children)==='Thu hồi quyền').at(-1);
+    assert.ok(revoke);revoke.props.onClick();await h.settle();
+    assert.ok(h.calls.some(call=>call.url==='/admin/users/11/teacher'&&call.method==='DELETE'));
+    assert.match(h.text(studentRow()),/Học viên/);
+  }finally{global.confirm=previous;}
 });
 
 test('room loading and network errors do not render a false zero-room empty state',async()=>{

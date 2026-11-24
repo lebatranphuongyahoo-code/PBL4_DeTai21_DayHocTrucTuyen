@@ -15,7 +15,7 @@ import org.springframework.web.socket.handler.ConcurrentWebSocketSessionDecorato
 /** Classroom relay: independent bounded queues keep a slow recipient off the receive thread. */
 @Component
 public class MediaWebSocketHandler extends BinaryWebSocketHandler {
-    private static final int SCREEN=1, AUDIO=2, MAX_SCREEN=1_500_000, AUDIO_INPUT=645;
+    private static final int SCREEN=1, AUDIO=2, MAX_SCREEN=256_000, AUDIO_INPUT=645;
     private final ClassroomService rooms;
     private final MediaTicketService tickets;
     private final ObjectMapper json=new ObjectMapper();

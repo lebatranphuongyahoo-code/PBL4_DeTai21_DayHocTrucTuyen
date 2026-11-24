@@ -76,6 +76,10 @@ class AdminApiTest {
         mvc.perform(post("/api/admin/users/"+promoteId+"/teacher").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
         mvc.perform(post("/api/admin/users/"+promoteId+"/teacher").header("Authorization",adminHeader)).andExpect(status().isOk());
         org.junit.jupiter.api.Assertions.assertEquals("TEACHER",db.findAccount("promoteapi").role());
+        mvc.perform(delete("/api/admin/users/"+promoteId+"/teacher").header("Authorization",teacherHeader)).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/admin/users/"+promoteId+"/teacher").header("Authorization",adminHeader)).andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals("STUDENT",db.findAccount("promoteapi").role());
+        mvc.perform(delete("/api/admin/users/"+promoteId+"/teacher").header("Authorization",adminHeader)).andExpect(status().isConflict());
 
         var adminCreated=mvc.perform(post("/api/admin/rooms").header("Authorization",adminHeader).contentType("application/json")
                 .content("{\"name\":\"Admin assigned room\",\"teacherUsername\":\"teachapi\"}"))
@@ -83,6 +87,8 @@ class AdminApiTest {
         long assignedRoomId=new com.fasterxml.jackson.databind.ObjectMapper().readTree(adminCreated.getResponse().getContentAsString()).get("roomId").asLong();
         mvc.perform(get("/api/admin/rooms/"+assignedRoomId).header("Authorization",adminHeader))
             .andExpect(status().isOk()).andExpect(jsonPath("$.room.ownerUsername").value("teachapi"));
+        mvc.perform(delete("/api/admin/users/"+db.findAccount("teachapi").id()+"/teacher").header("Authorization",adminHeader))
+            .andExpect(status().isConflict());
         mvc.perform(post("/api/admin/rooms").header("Authorization",adminHeader).contentType("application/json")
                 .content("{\"name\":\"Bad owner room\",\"teacherUsername\":\"studentapi\"}"))
             .andExpect(status().isBadRequest());

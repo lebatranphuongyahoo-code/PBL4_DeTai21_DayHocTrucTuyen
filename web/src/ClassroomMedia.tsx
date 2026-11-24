@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api, ChatMessage, User } from './api';
 import { mergeChat } from './chat';
 import { Icon } from './Icons';
+import { adjustScreenRate } from './mediaPacing';
 
 type Props = { meetingBusy?: boolean; onMeetingEnded:()=>void; meetingId: number | null; meetingOpen: boolean; onMeetingChange:(open:boolean)=>void; onCheckMeeting:()=>void; roomId: number; roomName: string; ownerName: string; owned: boolean; token: string; user: User; onManage: () => void; onExit: () => void };
 type Playback = { context: AudioContext; times: Map<string, number>; sequences: Map<string, number> };
@@ -17,6 +18,7 @@ export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meeting
   const microphone = useRef<MediaStream | null>(null), capture = useRef<AudioContext | null>(null);
   const playback = useRef<Playback | null>(null), sequence = useRef(0), frameUrl = useRef('');
   const micVersion = useRef(0), screenVersion = useRef(0);
+  const screenFps = useRef(8), clearScreenSince = useRef<number | null>(null);
   const [connected, setConnected] = useState(false), [attempt, setAttempt] = useState(0);
   const [status, setStatus] = useState('Đang kết nối phòng học…');
   const [sharing, setSharing] = useState(false), [micOn, setMicOn] = useState(false);
@@ -185,6 +187,7 @@ export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meeting
   async function startScreen() {
     if (!canShare || !connected || shareBusy) return;
     const version = ++screenVersion.current; setShareBusy(true);
+    screenFps.current = 8; clearScreenSince.current = null;
     let stream: MediaStream | undefined;
     try {
       const options = {
@@ -204,19 +207,29 @@ export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meeting
       const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d');
       const nextFrame = async () => {
         if (version !== screenVersion.current || screen.current !== stream || !ctx) return;
+        const frameStarted = performance.now();
         const ws = socket.current;
-        if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < 128_000 && video.videoWidth) {
+        if (ws?.readyState === WebSocket.OPEN) {
+          const pacing = adjustScreenRate(screenFps.current, ws.bufferedAmount, clearScreenSince.current, performance.now());
+          screenFps.current = pacing.fps; clearScreenSince.current = pacing.clearSince;
+        }
+        if (ws?.readyState === WebSocket.OPEN && ws.bufferedAmount < 24_000 && video.videoWidth) {
           const scale = Math.min(1, 1280 / video.videoWidth, 720 / video.videoHeight);
           canvas.width = Math.round(video.videoWidth * scale); canvas.height = Math.round(video.videoHeight * scale);
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.66));
-          if (blob && blob.size <= 1_500_000 && version === screenVersion.current) {
+          let blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.66));
+          if (blob && blob.size > 256_000)
+            blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.45));
+          if (blob && blob.size <= 256_000 && version === screenVersion.current) {
             const bytes = await blob.arrayBuffer(), packet = new Uint8Array(bytes.byteLength + 1);
             packet[0] = SCREEN; packet.set(new Uint8Array(bytes), 1);
-            if (ws.readyState === WebSocket.OPEN && version === screenVersion.current) ws.send(packet);
+            if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 24_000 && version === screenVersion.current) ws.send(packet);
           }
         }
-        if (version === screenVersion.current) frameTimer.current = window.setTimeout(() => void nextFrame(), 125);
+        if (version === screenVersion.current) {
+          const delay = Math.max(0, 1000 / screenFps.current - (performance.now() - frameStarted));
+          frameTimer.current = window.setTimeout(() => void nextFrame(), delay);
+        }
       };
       setSharing(true); setStatus('Đang chia sẻ bài giảng.'); void nextFrame();
     } catch (error) {
@@ -234,9 +247,11 @@ export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meeting
     try {
       // Resume playback during the user's click; microphone permission is independent.
       await listen();
-      stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: { ideal: 1 }, echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false });
       if (version !== micVersion.current) { stream.getTracks().forEach(t => t.stop()); return; }
-      context = new AudioContext(); await context.audioWorklet.addModule('/audio-capture.js');
+      try { context = new AudioContext({ sampleRate: 16_000, latencyHint: 'interactive' }); }
+      catch { context = new AudioContext({ latencyHint: 'interactive' }); }
+      await context.audioWorklet.addModule('/audio-capture.js');
       if (version !== micVersion.current) { stream.getTracks().forEach(t => t.stop()); await context.close(); return; }
       microphone.current = stream; capture.current = context;
       const node = new AudioWorkletNode(context, 'classroom-capture');
@@ -251,7 +266,12 @@ export function ClassroomMedia({ meetingBusy, onMeetingEnded, meetingId, meeting
         ++sentAudio.current;
       };
       const mute = context.createGain(); mute.gain.value = 0;
-      context.createMediaStreamSource(stream).connect(node); node.connect(mute); mute.connect(context.destination);
+      const compressor = context.createDynamicsCompressor();
+      compressor.threshold.value = -18; compressor.knee.value = 12; compressor.ratio.value = 3;
+      compressor.attack.value = 0.003; compressor.release.value = 0.25;
+      const makeup = context.createGain(); makeup.gain.value = 1.35;
+      context.createMediaStreamSource(stream).connect(compressor); compressor.connect(makeup); makeup.connect(node);
+      node.connect(mute); mute.connect(context.destination);
       await context.resume();
       if (version !== micVersion.current) { stream.getTracks().forEach(t => t.stop()); await context.close(); return; }
       context.onstatechange = () => { if (capture.current === context && context?.state !== 'running') { stopMic(); setStatus('Mic bị trình duyệt tạm dừng. Bật mic lại để phục hồi.'); } };

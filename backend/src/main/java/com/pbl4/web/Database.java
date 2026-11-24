@@ -132,6 +132,14 @@ public class Database {
             return s.executeUpdate() == 1;
         }
     }
+    public synchronized boolean demoteTeacherToStudent(long accountId) throws SQLException {
+        String sql = "UPDATE accounts SET role='STUDENT' WHERE id=? AND role='TEACHER' AND status='ACTIVE' " +
+            "AND NOT EXISTS(SELECT 1 FROM classrooms WHERE owner_id=accounts.id)";
+        try (PreparedStatement s = connection.prepareStatement(sql)) {
+            s.setLong(1, accountId);
+            return s.executeUpdate() == 1;
+        }
+    }
     private Account account(ResultSet rs) throws SQLException {
         return new Account(rs.getLong("id"), rs.getString("username"), rs.getString("display_name"), rs.getString("password_hash"), rs.getString("role"));
     }

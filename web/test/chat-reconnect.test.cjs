@@ -15,7 +15,7 @@ test('reconnect starts a contiguous recent page after more than 50 offline messa
   class Socket{static OPEN=1;constructor(){sockets.push(this);}close(){}send(){}}
   const filename=path.join(__dirname,'../src/ClassroomMedia.tsx');
   const compiled=new Module(filename,module);compiled.paths=module.paths;
-  compiled.require=name=>name==='react'?hooks:name==='./api'?{api:async()=>({ticket:'qa'})}:name==='./Icons'?{Icon:()=>null}:name==='./chat'?{mergeChat:(a,b)=>[...new Map([...a,...b].map(m=>[m.id,m])).values()].sort((a,b)=>a.id-b.id)}:require(name);
+  compiled.require=name=>name==='react'?hooks:name==='./api'?{api:async()=>({ticket:'qa'})}:name==='./Icons'?{Icon:()=>null}:name==='./chat'?{mergeChat:(a,b)=>[...new Map([...a,...b].map(m=>[m.id,m])).values()].sort((a,b)=>a.id-b.id)}:name==='./mediaPacing'?{adjustScreenRate:(fps)=>({fps,clearSince:null})}:require(name);
   const previous={window:global.window,location:global.location,WebSocket:global.WebSocket,document:global.document};
   global.document={};
   global.window={setInterval(){return 1;},clearInterval(){},clearTimeout(){}};

@@ -59,6 +59,10 @@ public class ClassroomService {
         admin(user);
         if(!db.promoteStudentToTeacher(accountId))throw new AuthService.Failure(409,"Chỉ tài khoản học viên đang hoạt động mới được cấp quyền giảng viên.",Map.of());
     }
+    public void demoteTeacherToStudent(Database.Account user,long accountId) throws SQLException {
+        admin(user);
+        if(!db.demoteTeacherToStudent(accountId))throw new AuthService.Failure(409,"Chỉ có thể thu hồi quyền của giảng viên đang hoạt động chưa đứng tên lớp. Hãy chuyển quyền sở hữu các lớp trước.",Map.of());
+    }
     public AdminDetail adminDetail(Database.Account user,long id) throws SQLException {
         return db.transaction(c->{
             admin(user); Stored room=room(c,id);
